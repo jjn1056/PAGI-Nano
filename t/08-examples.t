@@ -5,6 +5,7 @@ use Future::AsyncAwait;
 use File::Spec ();
 use FindBin ();
 use Cwd ();
+use JSON::MaybeXS qw(decode_json);
 use PAGI::Test::Client;
 
 # The examples themselves use modern Perl (signatures etc.), so this harness can
@@ -212,6 +213,24 @@ subtest 'duplex-http-stream' => sub {
     my $res = $c->post('/duplex', body => 'ping');
     is $res->status, 200, 'streamed 200';
     like $res->content, qr/echo: ping/, 'request body echoed';
+};
+
+subtest 'custom-send-events' => sub {
+    # The handler emits its own { type => 'app.event', ... } events; the middleware
+    # translates them into named SSE events and adds a sequence number the app
+    # never sets. It's a burst (no timer), so the rendering is fully testable here.
+    my $c = PAGI::Test::Client->new(app => load_example('custom-send-events'));
+    $c->sse('/feed', sub {
+        my ($sse) = @_;
+        my $e1 = $sse->receive_event;
+        is $e1->{event}, 'status', 'middleware named the SSE event from the domain event';
+        my $d1 = decode_json($e1->{data});
+        is $d1->{value}, 'online', 'app payload preserved';
+        is $d1->{seq}, 1, 'middleware added a sequence number the app never set';
+        my $e2 = $sse->receive_event;
+        is $e2->{event}, 'tick', 'second event named';
+        is decode_json($e2->{data})->{seq}, 2, 'sequence increments across events';
+    });
 };
 
 subtest 'mounted-stash-state' => sub {
