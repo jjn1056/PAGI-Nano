@@ -211,6 +211,18 @@ subtest 'mounted-stash-state' => sub {
     $c->stop;
 };
 
+subtest 'named-routes' => sub {
+    my $c = PAGI::Test::Client->new(app => load_example('named-routes'));
+
+    my $home = $c->get('/')->json;
+    is $home->{first_user}, '/api/users/1', 'parent links to a name in the mount (prefixed)';
+
+    my $user = $c->get('/api/users/7')->json;
+    is $user->{self}, '/api/users/7', 'mount links its own name with the mount prefix';
+    is $user->{edit}, '/api/users/7?edit=1', 'query string included';
+    is $user->{back_home}, '/', 'mount links to a name in the parent';
+};
+
 subtest 'run-shape examples still load' => sub {
     my $qs = load_example('quickstart');
     is ref($qs), 'CODE', 'quickstart app.pl loads';

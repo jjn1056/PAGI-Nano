@@ -49,6 +49,7 @@ One further example beyond the upstream ports:
 | Nano example | Demonstrates |
 |---|---|
 | `mounted-stash-state` | a mounted sub-app reading the request stash set by parent middleware and the lifecycle objects the parent put in app state at startup (the same shared instance) |
+| `named-routes` | naming routes with `name(...)` and building links with `$c->uri_for`, including across a mount in both directions (parent ↔ mount) |
 
 ## Intentionally **not** ported — infrastructure-level
 

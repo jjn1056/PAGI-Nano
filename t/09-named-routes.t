@@ -1,0 +1,107 @@
+use strict;
+use warnings;
+use Test2::V0;
+use Future::AsyncAwait;
+use PAGI::Test::Client;
+use PAGI::Nano;
+
+# Named routes for link generation. A route is named with the name() marker (in
+# the same arrow chain as the path and middleware); $c->uri_for builds the URL.
+# Crucially, names form one flat namespace across mounts: a mounted app can link
+# to a name in the parent, and the parent can link to a name in the mount.
+
+subtest 'name() + uri_for resolves a route' => sub {
+    my $app = app {
+        get '/users/:id' => name('user') => sub {
+            my ($c, $id) = @_;
+            { url => $c->uri_for('user', { id => $id }) };
+        };
+    };
+    my $res = PAGI::Test::Client->new(app => $app)->get('/users/5');
+    is $res->json, { url => '/users/5' }, 'path param substituted';
+};
+
+subtest 'uri_for appends a query string' => sub {
+    my $app = app {
+        get '/users/:id' => name('user') => sub {
+            my ($c, $id) = @_;
+            { url => $c->uri_for('user', { id => $id }, { tab => 'profile' }) };
+        };
+    };
+    my $res = PAGI::Test::Client->new(app => $app)->get('/users/5');
+    is $res->json->{url}, '/users/5?tab=profile', 'query string appended';
+};
+
+subtest 'middleware() marker is equivalent to the [] shorthand' => sub {
+    my @trail;
+    my $mw = async sub {
+        my ($scope, $receive, $send, $next) = @_;
+        push @trail, 'mw';
+        await $next->();
+    };
+    my $app = app {
+        get '/a' => middleware($mw) => sub { my ($c) = @_; { ok => 1 } };
+    };
+    PAGI::Test::Client->new(app => $app)->get('/a');
+    is \@trail, ['mw'], 'middleware() marker ran the middleware';
+};
+
+subtest 'name() composes with middleware in any order' => sub {
+    my @trail;
+    my $mw = async sub {
+        my ($scope, $receive, $send, $next) = @_;
+        push @trail, 'mw';
+        await $next->();
+    };
+    my $app = app {
+        get '/a' => middleware($mw) => name('thing') => sub {
+            my ($c) = @_;
+            { url => $c->uri_for('thing') };
+        };
+    };
+    my $res = PAGI::Test::Client->new(app => $app)->get('/a');
+    is \@trail, ['mw'], 'middleware ran';
+    is $res->json, { url => '/a' }, 'route still named and linkable';
+};
+
+subtest 'cross-mount: parent links to mount name, mount links to parent name' => sub {
+    my $api = app {
+        get '/users/:id' => name('user') => sub {
+            my ($c, $id) = @_;
+            {
+                self => $c->uri_for('user', { id => $id }),   # own name
+                home => $c->uri_for('home'),                  # parent's name
+            };
+        };
+    };
+
+    my $app = app {
+        get '/' => name('home') => sub {
+            my ($c) = @_;
+            { api_user => $c->uri_for('user', { id => 7 }) };  # mount's name
+        };
+        mount '/api' => $api;
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app);
+
+    my $in_mount = $client->get('/api/users/3')->json;
+    is $in_mount->{self}, '/api/users/3', 'mount links its own name with the mount prefix';
+    is $in_mount->{home}, '/', 'mount links a name defined in the parent';
+
+    my $in_parent = $client->get('/')->json;
+    is $in_parent->{api_user}, '/api/users/7',
+        'parent links a name defined in the mount, mount-prefixed';
+};
+
+subtest 'duplicate route names are a loud error' => sub {
+    my $err = dies {
+        app {
+            get '/a' => name('dup') => sub { my ($c) = @_; 'a' };
+            get '/b' => name('dup') => sub { my ($c) = @_; 'b' };
+        };
+    };
+    like $err, qr/[Dd]uplicate route name 'dup'/, 'naming the same name twice dies';
+};
+
+done_testing;

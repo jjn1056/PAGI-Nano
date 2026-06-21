@@ -2,6 +2,7 @@ package PAGI::Nano::Context::HTTP;
 
 use strict;
 use warnings;
+use Carp ();
 use parent -norequire, 'PAGI::Context::HTTP';
 use PAGI::Context;          # PAGI::Context::HTTP declares @ISA but does not load
 use PAGI::Context::HTTP;    # the base; pull both in when used outside the factory
@@ -29,6 +30,48 @@ sub params {
     return $req->is_json
         ? PAGI::StructuredParameters->from_data($req, $self)
         : PAGI::StructuredParameters->from_body($req, $self);
+}
+
+# Build a URL for a named route. Resolves against the flat name->path registry
+# PAGI::Nano injects on the scope, so any name in the app (including across
+# mounts) is reachable.
+sub uri_for {
+    my ($self, $name, $path_params, $query_params) = @_;
+
+    my $routes = $self->{scope}{'pagi.nano.routes'};
+    Carp::croak('uri_for: no named-route registry on the scope '
+        . '(is this a PAGI::Nano app, and is the route named?)')
+        unless $routes;
+    my $path = $routes->{$name};
+    Carp::croak("uri_for: no route named '$name'") unless defined $path;
+
+    $path_params  ||= {};
+    $query_params ||= {};
+
+    for my $key (keys %$path_params) {
+        my $val = $path_params->{$key};
+        $val = '' unless defined $val;
+        $path =~ s/\{\Q$key\E(?::[^}]*)?\}/$val/g
+            or $path =~ s/:\Q$key\E(?!\w)/$val/g
+            or $path =~ s/\*\Q$key\E(?!\w)/$val/g;
+    }
+
+    if (%$query_params) {
+        my @pairs;
+        for my $k (sort keys %$query_params) {
+            push @pairs, _uri_escape($k) . '=' . _uri_escape($query_params->{$k});
+        }
+        $path .= '?' . join('&', @pairs);
+    }
+
+    return $path;
+}
+
+sub _uri_escape {
+    my ($s) = @_;
+    $s = '' unless defined $s;
+    $s =~ s/([^A-Za-z0-9\-_.~])/sprintf('%%%02X', ord($1))/ge;
+    return $s;
 }
 
 1;
@@ -61,7 +104,7 @@ is available — C<req>/C<request>, C<response>/C<resp>, C<respond>, C<method>,
 C<state>, C<path_param>, and the response sugar C<json>/C<text>/C<html>/
 C<redirect>. A Nano handler receives one of these as C<$c>.
 
-The single addition is L</params>.
+The additions are L</params> and L</uri_for>.
 
 =head1 METHODS
 
@@ -80,6 +123,20 @@ on-missing callback receives it as its first argument.
 
 Because reading a request body is asynchronous, the terminal C<permitted> and
 C<required> calls must be awaited.
+
+=head2 uri_for
+
+    my $url = $c->uri_for($name);
+    my $url = $c->uri_for($name, \%path_params);
+    my $url = $c->uri_for($name, \%path_params, \%query_params);
+
+Builds the URL for a route named with L<PAGI::Nano/name>. Path placeholders
+(C<:id>, C<{id}>, C<{id:regex}>, C<*splat>) are filled from C<%path_params>, and
+C<%query_params> (if any) is appended as a percent-encoded query string.
+Resolution is against the flat name registry PAGI::Nano injects on the scope, so
+names defined anywhere in the app — including across a C<mount>, in either
+direction — are reachable, with mount prefixes applied. Dies if the name is
+unknown.
 
 =head1 SEE ALSO
 

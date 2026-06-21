@@ -20,7 +20,20 @@ our @EXPORT = qw(
     startup shutdown
     static not_found
     websocket sse
+    name middleware
 );
+
+# Per-route attribute markers. Both sit in the arrow chain between the path and
+# the handler, in any order; an arrayref is shorthand for middleware().
+sub name       { my ($n) = @_; bless { name => $n }, 'PAGI::Nano::Marker::Name' }
+sub middleware { bless { list => [@_] }, 'PAGI::Nano::Marker::Middleware' }
+
+# Module-level registry mapping an assembled app coderef to its flat name->path
+# table, so a parent's mount can collect a mounted Nano app's named routes (the
+# app is an opaque coderef; this is the bridge across that boundary). Apps are
+# created at startup and live for the process, so a stringified-coderef key is
+# stable in practice.
+our %APP_ROUTES;
 
 # The dynamically-scoped current collector. app { } localizes this to a fresh
 # collector for the duration of the block; the verbs register into it. No package
@@ -34,10 +47,13 @@ our $COLLECTOR;
 sub app (&) {
     my ($block) = @_;
     local $COLLECTOR = {
-        router   => PAGI::App::Router->new,
-        app_mw   => [],
-        startup  => [],
-        shutdown => [],
+        router       => PAGI::App::Router->new,
+        app_mw       => [],
+        startup      => [],
+        shutdown     => [],
+        named        => {},   # name => full path (own routes, group prefixes applied)
+        nano_mounts  => [],   # { prefix => ..., app => <Nano app coderef> }
+        prefix_stack => [],   # active group prefixes, for naming
     };
     $block->();
     return _assemble($COLLECTOR);
@@ -58,7 +74,36 @@ sub _assemble {
         $app = $lifespan->to_app;
     }
 
-    return $app;
+    # Flat name -> absolute-path registry: this app's own named routes plus those
+    # of any mounted Nano app (prefixed, recursively via their stored tables).
+    my $flat = _build_flat_routes($collector);
+
+    return $app unless %$flat;   # nothing named anywhere -> no link machinery
+
+    # Outermost wrapper: inject the registry on each request so $c->uri_for can
+    # resolve any name from anywhere. The outermost app wins (//=), so a mounted
+    # app sees the parent's fuller, mount-prefixed registry.
+    my $inner = $app;
+    my $wrapped = sub {
+        my ($scope, $receive, $send) = @_;
+        $scope->{'pagi.nano.routes'} //= $flat if ref $scope eq 'HASH';
+        return $inner->($scope, $receive, $send);
+    };
+    $APP_ROUTES{"$wrapped"} = { flat => $flat };
+    return $wrapped;
+}
+
+sub _build_flat_routes {
+    my ($collector) = @_;
+    my %flat = %{ $collector->{named} };
+    for my $m (@{ $collector->{nano_mounts} }) {
+        my $child = $APP_ROUTES{ "$m->{app}" } or next;   # non-Nano mount: no names
+        for my $nm (keys %{ $child->{flat} }) {
+            Carp::croak("Duplicate route name '$nm'") if exists $flat{$nm};
+            $flat{$nm} = $m->{prefix} . $child->{flat}{$nm};
+        }
+    }
+    return \%flat;
 }
 
 # Wrap $app in app-wide middleware, mirroring PAGI::App::Router's event-layer
@@ -101,30 +146,39 @@ sub del    { _add_route('DELETE', @_) }
 
 sub any {
     my ($path, @rest) = @_;
-    my ($mw, $handler) = _split_mw_handler(@rest);
+    my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_http($handler, $path);
     $COLLECTOR->{router}->any($path, ($mw ? ($mw) : ()), $wrapped);
+    _register_name($name, $path) if defined $name;
 }
 
 sub _add_route {
     my ($method, $path, @rest) = @_;
-    my ($mw, $handler) = _split_mw_handler(@rest);
+    my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_http($handler, $path);
     $COLLECTOR->{router}->route($method, $path, ($mw ? ($mw) : ()), $wrapped);
+    _register_name($name, $path) if defined $name;
 }
 
 # --- grouping, mounting, static --------------------------------------------
 
 sub group {
     my ($prefix, @rest) = @_;
-    my ($mw, $block) = _split_mw_handler(@rest);
+    my ($mw, $block) = _parse_route_args(@rest);
     # The router manages the prefix/middleware stack; our verbs register into the
-    # same router during the block, so they are prefixed and branch-wrapped.
+    # same router during the block, so they are prefixed and branch-wrapped. We
+    # track the prefix in parallel so named routes record their full path.
+    push @{ $COLLECTOR->{prefix_stack} }, $prefix;
     $COLLECTOR->{router}->group($prefix, ($mw ? ($mw) : ()), sub { $block->() });
+    pop @{ $COLLECTOR->{prefix_stack} };
 }
 
 sub mount {
     my ($prefix, $app) = @_;
+    # Record Nano mounts so their named routes can be folded into this app's flat
+    # registry (prefixed). Non-Nano mounts (PSGI bridges, file servers) have none.
+    push @{ $COLLECTOR->{nano_mounts} }, { prefix => $prefix, app => $app }
+        if exists $APP_ROUTES{"$app"};
     $COLLECTOR->{router}->mount($prefix, $app);
 }
 
@@ -153,16 +207,26 @@ sub not_found {
 
 sub websocket {
     my ($path, @rest) = @_;
-    my ($mw, $handler) = _split_mw_handler(@rest);
+    my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_socket($handler, $path);
     $COLLECTOR->{router}->websocket($path, ($mw ? ($mw) : ()), $wrapped);
+    _register_name($name, $path) if defined $name;
 }
 
 sub sse {
     my ($path, @rest) = @_;
-    my ($mw, $handler) = _split_mw_handler(@rest);
+    my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_socket($handler, $path);
     $COLLECTOR->{router}->sse($path, ($mw ? ($mw) : ()), $wrapped);
+    _register_name($name, $path) if defined $name;
+}
+
+sub _register_name {
+    my ($name, $path) = @_;
+    my $full = join('', @{ $COLLECTOR->{prefix_stack} }, $path);
+    Carp::croak("Duplicate route name '$name'")
+        if exists $COLLECTOR->{named}{$name};
+    $COLLECTOR->{named}{$name} = $full;
 }
 
 # --- handler wrapping -------------------------------------------------------
@@ -280,14 +344,36 @@ sub _normalize_middleware_list {
     return [ map { _normalize_middleware($_) } @$specs ];
 }
 
-# Split (\@middleware, $target) or ($target); normalize any middleware names.
-sub _split_mw_handler {
-    my @rest = @_;
-    if (@rest >= 2 && ref($rest[0]) eq 'ARRAY') {
-        my ($mw, $target) = @rest;
-        return (_normalize_middleware_list($mw), $target);
+# Parse the arguments between a verb's path and its handler: an arrayref or a
+# middleware() marker contributes middleware; a name() marker names the route;
+# the bare trailing coderef is the handler. Markers may appear in any order.
+# Returns (\@normalized_middleware | undef, $handler, $name | undef).
+sub _parse_route_args {
+    my @args = @_;
+    my ($handler, $name, @mw);
+    for my $arg (@args) {
+        my $ref = ref $arg;
+        if ($ref eq 'CODE') {
+            $handler = $arg;
+        }
+        elsif ($ref eq 'ARRAY') {
+            push @mw, @$arg;
+        }
+        elsif (Scalar::Util::blessed($arg)
+            && $arg->isa('PAGI::Nano::Marker::Middleware')) {
+            push @mw, @{ $arg->{list} };
+        }
+        elsif (Scalar::Util::blessed($arg)
+            && $arg->isa('PAGI::Nano::Marker::Name')) {
+            $name = $arg->{name};
+        }
+        else {
+            Carp::croak('Unexpected route argument: '
+                . (defined $arg ? $arg : 'undef'));
+        }
     }
-    return (undef, $rest[0]);
+    my $mw = @mw ? _normalize_middleware_list(\@mw) : undef;
+    return ($mw, $handler, $name);
 }
 
 1;
@@ -376,7 +462,7 @@ are out of scope (use Valiant downstream and your own model).
 All of the following are exported by default:
 C<app>, C<get>, C<post>, C<put>, C<patch>, C<del>, C<any>, C<group>, C<mount>,
 C<enable>, C<startup>, C<shutdown>, C<static>, C<not_found>, C<websocket>,
-C<sse>.
+C<sse>, C<name>, C<middleware>.
 
 =head1 THE COLLECTOR
 
@@ -405,6 +491,13 @@ A route's C<:placeholders> become the handler's parameters, in path order, after
 C<$c>: C<< get '/u/:uid/p/:pid' => sub ($c, $uid, $pid) { ... } >>. The supported
 placeholder forms are C<:name>, C<{name}>, C<{name:regex}>, and C<*splat>.
 C<< $c->path_param('name') >> remains available.
+
+Per-route attributes are given as markers in the same arrow chain, before the
+handler, in any order: L</name> names the route for link generation, and
+L</middleware> (or the C<[...]> shorthand) scopes middleware to it:
+
+    get '/users/:id' => name('user') => middleware('Auth') => sub ($c, $id) { ... };
+    get '/users/:id' => name('user') => ['Auth']          => sub ($c, $id) { ... };
 
 =head2 any
 
@@ -473,6 +566,37 @@ C<PAGI::Middleware::GZip>; a leading C<^> (C<'^My::MW'>) escapes the prefix.
 Instances and coderefs (with the C<< ($scope, $receive, $send, $next) >>
 signature) are also accepted. Route- and group-scoped middleware use the
 C<[\@middleware]> form and are normalized the same way.
+
+=head1 NAMED ROUTES AND LINKS
+
+=head2 name
+
+    get '/users/:id' => name('user') => sub ($c, $id) { ... };
+
+A marker that names the route. Names form a single flat namespace across the
+whole app (including mounted sub-apps); a duplicate name is a loud error.
+
+=head2 middleware
+
+    get '/x' => middleware('Auth', $coderef) => sub ($c) { ... };
+
+A marker that scopes the given middleware to the route (the C<[...]> arrayref is
+the everyday shorthand). Accepts the same names, instances, and coderefs as
+L</enable>.
+
+=head2 C<< $c->uri_for >>
+
+    $c->uri_for('user', { id => 5 });                  # /users/5
+    $c->uri_for('user', { id => 5 }, { tab => 'a' });  # /users/5?tab=a
+
+Builds the URL for a named route, substituting path placeholders and appending
+an optional query string. Because Nano injects one flat name registry onto the
+request scope, C<uri_for> resolves B<any> name from B<anywhere> — including
+across a C<mount> in both directions: a mounted app can link to a name defined
+in its parent, and the parent can link to a name defined in the mount (paths are
+returned with the mount prefix applied). C<uri_for> is available on the HTTP
+context (C<$c>); WebSocket/SSE handlers can read the registry from
+C<< $c->scope->{'pagi.nano.routes'} >> directly.
 
 =head1 LIFECYCLE AND SHARED STATE
 
