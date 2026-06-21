@@ -16,10 +16,17 @@ use PAGI::Nano;
 # non-browser / service-to-service / HTTP-2 clients.
 #
 #     pagi-server app.pl
-#     # plain curl: the connection drives the stream, so ticks keep coming until
-#     # you stop reading (not tied to the request body):
+#
+#     # Plain POST sends NO request body, so there is nothing to echo; the
+#     # connection drives the stream, so ticks keep coming until you stop reading:
 #     curl -N -XPOST --max-time 4 http://127.0.0.1:5000/duplex
-#     # full duplex (stream the request body while reading the response):
+#
+#     # To actually send a body and see echoes, stream stdin as the body with
+#     # `-T -` (so you get echo: lines interleaved with ticks):
+#     ( printf 'hello\n'; sleep 1; printf 'world\n'; sleep 2 ) \
+#         | curl -N -T - -XPOST -H 'Transfer-Encoding: chunked' http://127.0.0.1:5000/duplex
+#
+#     # Full-duplex wire proof (request body streamed while reading the response):
 #     perl probe.pl 5000
 
 my $app = app {
