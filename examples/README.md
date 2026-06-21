@@ -34,7 +34,7 @@ same thing (e.g. two WebSocket echoes, two chat apps), they are merged into one.
 | `psgi-bridge` | Tools 09-psgi-bridge | mounting a legacy PSGI app via WrapPSGI |
 | `background-tasks` | Tools background-tasks | respond now, run a retained Future after |
 | `flow-control` | PAGI 13-flow-control | SSE conflation under transport backpressure |
-| `event-middleware` | PAGI 17-event-middleware | a coderef middleware folding a lifespan-owned periodic source's events into `$receive` (the race-without-cancel technique), consumed by a pure streaming NDJSON handler that switches on event type |
+| `sse-custom-events` | PAGI 17-event-middleware (evolved to SSE) | two custom SSE event types on one channel — `tick` (periodic source) and `message` (user-driven: `POST /say` broadcast to all subscribers) — folded into `$receive` by a coderef middleware using the race-without-cancel technique; includes `probe.pl` |
 | `full-demo` | Tools full-demo | HTTP + WS + SSE + lifespan in one app |
 | `contact-form` | Tools 13-contact-form | form strong-params + 400 + multipart upload |
 | `periodic-events` | PAGI 14-periodic-events | lifespan ticker + long-poll + NDJSON stream |

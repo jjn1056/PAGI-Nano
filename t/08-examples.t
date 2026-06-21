@@ -129,15 +129,19 @@ subtest 'flow-control' => sub {
     });
 };
 
-subtest 'event-middleware' => sub {
-    # The periodic ticker needs a real event loop, so in-process there are no
-    # ticks; we verify the streaming endpoint is wired. The NDJSON tick stream
-    # itself is shown by the real-server run in the example header.
-    my $c = PAGI::Test::Client->new(app => load_example('event-middleware'), lifespan => 1);
+subtest 'sse-custom-events' => sub {
+    # The periodic ticker and the broadcast fan-out need a real event loop, so
+    # in-process we verify the user-driven source (POST /say) and that the SSE
+    # stream connects. The broadcast itself is shown by probe.pl / the real-server
+    # run in the example header.
+    my $c = PAGI::Test::Client->new(app => load_example('sse-custom-events'), lifespan => 1);
     $c->start;
-    my $res = $c->get('/events');
-    is $res->status, 200, 'streaming endpoint responds';
-    like $res->content_type, qr{application/x-ndjson}, 'NDJSON content type';
+    my $res = $c->post('/say', body => 'hi there');
+    is $res->status, 202, 'POST /say accepted (the user-driven source)';
+    is $res->json->{broadcast}, 'hi there', 'message published';
+    my $connected = 0;
+    $c->sse('/events', sub { my ($sse) = @_; $connected = 1 });
+    ok $connected, 'SSE stream connects';
     $c->stop;
 };
 
