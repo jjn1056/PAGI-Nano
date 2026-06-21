@@ -34,7 +34,7 @@ same thing (e.g. two WebSocket echoes, two chat apps), they are merged into one.
 | `psgi-bridge` | Tools 09-psgi-bridge | mounting a legacy PSGI app via WrapPSGI |
 | `background-tasks` | Tools background-tasks | respond now, run a retained Future after |
 | `flow-control` | PAGI 13-flow-control | SSE conflation under transport backpressure |
-| `event-middleware` | PAGI 17-event-middleware | object middleware folding events into `$receive` |
+| `event-middleware` | PAGI 17-event-middleware | coderef middleware folding events into `$receive` |
 | `full-demo` | Tools full-demo | HTTP + WS + SSE + lifespan in one app |
 | `contact-form` | Tools 13-contact-form | form strong-params + 400 + multipart upload |
 | `periodic-events` | PAGI 14-periodic-events | lifespan ticker + long-poll + NDJSON stream |

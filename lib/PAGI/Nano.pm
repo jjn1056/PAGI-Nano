@@ -67,7 +67,12 @@ sub _wrap_with_middleware ($app, $mws) {
         if (ref($mw) eq 'CODE') {
             $chain = async sub ($scope, $receive, $send) {
                 await $mw->($scope, $receive, $send, async sub {
-                    await $next->($scope, $receive, $send);
+                    # Forward a transformed channel when the middleware passes
+                    # one; otherwise continue with the inherited triple. Matches
+                    # PAGI::App::Router so app-wide and route/group coderef
+                    # middleware behave the same.
+                    my ($s, $r, $sd) = @_ ? @_ : ($scope, $receive, $send);
+                    await $next->($s, $r, $sd);
                 });
             };
         }
