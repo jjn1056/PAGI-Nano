@@ -35,7 +35,7 @@ same thing (e.g. two WebSocket echoes, two chat apps), they are merged into one.
 | `background-tasks` | Tools background-tasks | respond now, run a retained Future after |
 | `flow-control` | PAGI 13-flow-control | SSE conflation under transport backpressure |
 | `sse-custom-events` | PAGI 17-event-middleware (evolved to SSE) | two custom SSE event types on one channel — `tick` (periodic source) and `message` (user-driven: `POST /say` broadcast to all subscribers) — folded into `$receive` by a coderef middleware using the race-without-cancel technique; includes `probe.pl` |
-| `custom-send-events` | the send-side mirror of `sse-custom-events` | the handler emits its own semantic `app.event`s on the raw send channel; a middleware translates them into named SSE events and enriches each with a server-assigned sequence number — the app never names a wire format or computes metadata |
+| `custom-send-events` | the send-side mirror of `sse-custom-events` | one wire-agnostic handler emits semantic `app.*` events on the raw send channel; two route-scoped renderer middlewares serve the **same `/feed` URL** as **SSE** (on `Accept: text/event-stream`) or **NDJSON** (plain HTTP, via the `raw` route), each enriching with a server-assigned sequence number — the handler never names a wire format |
 | `full-demo` | Tools full-demo | HTTP + WS + SSE + lifespan in one app |
 | `contact-form` | Tools 13-contact-form | form strong-params + 400 + multipart upload |
 | `periodic-events` | PAGI 14-periodic-events | lifespan ticker + long-poll + NDJSON stream |

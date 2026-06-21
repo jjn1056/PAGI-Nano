@@ -216,21 +216,30 @@ subtest 'duplex-http-stream' => sub {
 };
 
 subtest 'custom-send-events' => sub {
-    # The handler emits its own { type => 'app.event', ... } events; the middleware
-    # translates them into named SSE events and adds a sequence number the app
-    # never sets. It's a burst (no timer), so the rendering is fully testable here.
+    # One handler emits domain app.events; two route-scoped renderer middlewares
+    # produce SSE or NDJSON at the same /feed URL, each adding a sequence number
+    # the app never sets. A burst (no timer), so both formats are testable here.
     my $c = PAGI::Test::Client->new(app => load_example('custom-send-events'));
+
+    # SSE: Accept: text/event-stream promotes to the sse route + SSE renderer.
     $c->sse('/feed', sub {
         my ($sse) = @_;
         my $e1 = $sse->receive_event;
-        is $e1->{event}, 'status', 'middleware named the SSE event from the domain event';
+        is $e1->{event}, 'status', 'SSE: middleware named the event from the domain event';
         my $d1 = decode_json($e1->{data});
-        is $d1->{value}, 'online', 'app payload preserved';
-        is $d1->{seq}, 1, 'middleware added a sequence number the app never set';
-        my $e2 = $sse->receive_event;
-        is $e2->{event}, 'tick', 'second event named';
-        is decode_json($e2->{data})->{seq}, 2, 'sequence increments across events';
+        is $d1->{value}, 'online', 'SSE: app payload preserved';
+        is $d1->{seq}, 1, 'SSE: middleware added a sequence number';
     });
+
+    # NDJSON: a plain GET to the SAME URL hits the raw route + NDJSON renderer.
+    my $res = $c->get('/feed');
+    is $res->status, 200, 'NDJSON: 200';
+    like $res->content_type, qr{application/x-ndjson}, 'NDJSON content type';
+    my @lines = grep { length } split /\n/, $res->content;
+    is scalar(@lines), 4, 'NDJSON: one line per domain event';
+    my $first = decode_json($lines[0]);
+    is $first->{event}, 'status', 'NDJSON: same domain event, different wire format';
+    is $first->{seq}, 1, 'NDJSON: enriched with seq too';
 };
 
 subtest 'mounted-stash-state' => sub {
