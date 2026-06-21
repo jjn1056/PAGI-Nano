@@ -26,7 +26,11 @@ use PAGI::Nano;
 #     ( printf 'hello\n'; sleep 1; printf 'world\n'; sleep 2 ) \
 #         | curl -N -T - -XPOST -H 'Transfer-Encoding: chunked' http://127.0.0.1:5000/duplex
 #
-#     # Full-duplex wire proof (request body streamed while reading the response):
+#     # Note: typing into `curl -T -` interactively lags by one line — curl holds
+#     # the line you just typed in its upload buffer until its next read. That is
+#     # a curl artifact, not the server: the server echoes each chunk within ~40ms
+#     # of receiving it. For a real-time wire proof use the raw-socket probe, which
+#     # flushes each chunk immediately:
 #     perl probe.pl 5000
 
 my $app = app {
