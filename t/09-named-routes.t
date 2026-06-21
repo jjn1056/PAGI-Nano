@@ -94,6 +94,37 @@ subtest 'cross-mount: parent links to mount name, mount links to parent name' =>
         'parent links a name defined in the mount, mount-prefixed';
 };
 
+subtest 'uri_for works from WebSocket and SSE handlers too' => sub {
+    my $app = app {
+        get '/users/:id' => name('user') => sub { my ($c, $id) = @_; {} };
+
+        websocket '/ws' => async sub {
+            my ($c) = @_;
+            my $ws = $c->websocket;
+            await $ws->accept;
+            await $ws->send_text($c->uri_for('user', { id => 9 }));
+        };
+
+        sse '/sse' => async sub {
+            my ($c) = @_;
+            my $s = $c->sse;
+            await $s->send($c->uri_for('user', { id => 8 }));
+            await $s->close;
+        };
+    };
+    my $client = PAGI::Test::Client->new(app => $app);
+
+    $client->websocket('/ws', sub {
+        my ($ws) = @_;
+        is $ws->receive_text, '/users/9', 'uri_for from a WebSocket handler';
+    });
+
+    $client->sse('/sse', sub {
+        my ($sse) = @_;
+        is $sse->receive_event->{data}, '/users/8', 'uri_for from an SSE handler';
+    });
+};
+
 subtest 'duplicate route names are a loud error' => sub {
     my $err = dies {
         app {

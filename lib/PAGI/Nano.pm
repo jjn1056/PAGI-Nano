@@ -11,6 +11,8 @@ use PAGI::App::Router;
 use PAGI::Response;
 use PAGI::Context;
 use PAGI::Nano::Context::HTTP;
+use PAGI::Nano::Context::WebSocket;
+use PAGI::Nano::Context::SSE;
 
 use Exporter 'import';
 our @EXPORT = qw(
@@ -273,10 +275,22 @@ sub _wrap_socket {
     my @names = _placeholder_names($path);
     return sub {
         my ($scope, $receive, $send) = @_;
-        my $c = PAGI::Context->new($scope, $receive, $send);
+        my $c = _socket_context($scope, $receive, $send);
         my @params = map { $scope->{path_params}{$_} } @names;
         return _invoke_handler($handler, $c, \@params);
     };
+}
+
+# Vend the Nano WebSocket/SSE context (which carries uri_for) by scope type,
+# falling back to the stock polymorphic context for anything else.
+sub _socket_context {
+    my ($scope, $receive, $send) = @_;
+    my $type = $scope->{type} // '';
+    return PAGI::Nano::Context::WebSocket->new($scope, $receive, $send)
+        if $type eq 'websocket';
+    return PAGI::Nano::Context::SSE->new($scope, $receive, $send)
+        if $type eq 'sse';
+    return PAGI::Context->new($scope, $receive, $send);
 }
 
 # Call a handler and normalize its result to a Future, capturing a synchronous
@@ -594,9 +608,9 @@ an optional query string. Because Nano injects one flat name registry onto the
 request scope, C<uri_for> resolves B<any> name from B<anywhere> — including
 across a C<mount> in both directions: a mounted app can link to a name defined
 in its parent, and the parent can link to a name defined in the mount (paths are
-returned with the mount prefix applied). C<uri_for> is available on the HTTP
-context (C<$c>); WebSocket/SSE handlers can read the registry from
-C<< $c->scope->{'pagi.nano.routes'} >> directly.
+returned with the mount prefix applied). C<uri_for> is available on the context
+for every protocol — HTTP, WebSocket, and SSE handlers alike (see
+L<PAGI::Nano::Context>).
 
 =head1 LIFECYCLE AND SHARED STATE
 
