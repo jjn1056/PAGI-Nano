@@ -31,6 +31,8 @@ sub params ($self) {
 
 1;
 
+=encoding utf8
+
 =head1 NAME
 
 PAGI::Nano::Context::HTTP - The HTTP request context vended by PAGI::Nano
