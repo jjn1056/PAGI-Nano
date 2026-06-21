@@ -10,12 +10,6 @@ use Carp ();
 # resolves against the flat name registry PAGI::Nano injects on the scope — a
 # Nano concept the base toolkit knows nothing about.
 
-# The raw $send coderef, on any context type. The base PAGI::Context's ->send is
-# already this, but the SSE/WebSocket contexts override ->send with a protocol
-# convenience (sse.send / websocket.send), so reach for raw_send when you need to
-# emit your own events for a middleware to render.
-sub raw_send { shift->{send} }
-
 # Build a URL for a named route. Resolves against the flat name->path registry
 # PAGI::Nano injects on the scope, so any name in the app (including across
 # mounts, in either direction) is reachable.
@@ -74,18 +68,6 @@ stock PAGI context class for each scope type. It provides L</uri_for>, which is
 available to handlers of every protocol.
 
 =head1 METHODS
-
-=head2 raw_send
-
-    my $emit = $c->raw_send;
-    await $emit->({ type => 'app.event', ... });
-
-Returns the raw C<$send> coderef regardless of context type. The base HTTP
-context's C<< $c->send >> already is the raw send, but the WebSocket and SSE
-contexts override C<< $c->send >> with a protocol convenience
-(C<websocket.send> / C<sse.send>); C<raw_send> gives the underlying channel on
-all of them, so a handler can emit its own event types for a middleware to
-render (see the C<custom-send-events> example).
 
 =head2 uri_for
 
