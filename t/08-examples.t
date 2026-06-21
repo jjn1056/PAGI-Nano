@@ -193,6 +193,24 @@ subtest 'chat-showcase' => sub {
     $c->stop;
 };
 
+subtest 'mounted-stash-state' => sub {
+    my $c = PAGI::Test::Client->new(app => load_example('mounted-stash-state'), lifespan => 1);
+    $c->start;
+
+    my $ada = $c->get('/api/hello', headers => { 'X-User' => 'Ada' })->json;
+    is $ada->{user}, 'Ada', 'stash set by parent middleware reaches the mounted app';
+    is $ada->{greeting}, 'Hello, Ada!', 'lifecycle greeter from startup is usable in the mount';
+    is $ada->{greetings_so_far}, 1, 'lifecycle object state is live';
+
+    my $bob = $c->get('/api/hello', headers => { 'X-User' => 'Bob' })->json;
+    is $bob->{user}, 'Bob', 'stash is per-request';
+    is $bob->{greetings_so_far}, 2, 'same lifecycle instance is shared across requests';
+
+    is $c->get('/greetings')->json->{greetings_so_far}, 2,
+        'parent and mounted app share the very same lifecycle object in state';
+    $c->stop;
+};
+
 subtest 'run-shape examples still load' => sub {
     my $qs = load_example('quickstart');
     is ref($qs), 'CODE', 'quickstart app.pl loads';

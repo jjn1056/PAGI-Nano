@@ -44,6 +44,12 @@ same thing (e.g. two WebSocket echoes, two chat apps), they are merged into one.
 Plus the two run-shape examples from the original build: `quickstart` (single
 file) and `tasks-modulino` (a dual-use `lib/MyApp.pm`).
 
+One further example beyond the upstream ports:
+
+| Nano example | Demonstrates |
+|---|---|
+| `mounted-stash-state` | a mounted sub-app reading the request stash set by parent middleware and the lifecycle objects the parent put in app state at startup (the same shared instance) |
+
 ## Intentionally **not** ported — infrastructure-level
 
 PAGI::Nano produces an app value; it does not own the event loop, the server, or
