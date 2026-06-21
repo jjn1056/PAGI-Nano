@@ -53,8 +53,8 @@ subtest 'websocket-echo' => sub {
 
 subtest 'static-file' => sub {
     my $c = PAGI::Test::Client->new(app => load_example('static-file'));
-    like $c->get('/assets/')->content, qr/Served by PAGI::Nano/, 'index served';
-    is $c->get('/')->status, 200, 'root hint page';
+    like $c->get('/')->content, qr/Served by PAGI::Nano/, 'index served at root';
+    is $c->get('/index.html')->status, 200, 'named file served';
 };
 
 subtest 'lifespan-state' => sub {

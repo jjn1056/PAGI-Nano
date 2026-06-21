@@ -24,7 +24,7 @@ same thing (e.g. two WebSocket echoes, two chat apps), they are merged into one.
 | `request-body` | PAGI 03-request-body | reading and echoing the request body |
 | `utf8-echo` | PAGI 12-utf8 | UTF-8 round-trip across path and query |
 | `websocket-echo` | PAGI 04 / Tools websocket-echo-v2 | a WebSocket echo handler |
-| `static-file` | Tools app-01-file | static serving via `static` (PAGI::App::File) |
+| `static-file` | Tools app-01-file | static serving at root via `static` (PAGI::App::File) |
 | `lifespan-state` | PAGI 06 / Tools 14-lifespan-utils | startup/shutdown + shared `$c->state` |
 | `streaming-response` | PAGI 02-streaming-response | chunked streaming + `on_disconnect` |
 | `sse-broadcaster` | PAGI 05 / Tools sse-dashboard | SSE events with ids (reconnect-aware) |
