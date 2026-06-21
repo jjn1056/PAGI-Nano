@@ -50,6 +50,7 @@ One further example beyond the upstream ports:
 |---|---|
 | `mounted-stash-state` | a mounted sub-app reading the request stash set by parent middleware and the lifecycle objects the parent put in app state at startup (the same shared instance) |
 | `named-routes` | naming routes with `name(...)` and building links with `$c->uri_for`, including across a mount in both directions (parent ↔ mount) |
+| `duplex-http-stream` | full-duplex over a single HTTP request — read the streaming request body while streaming the response (the HTTP analog of `bidirectional-websocket`). Includes `probe.pl`, a raw-socket client that proves pagi-server pumps both directions concurrently on HTTP/1.1 |
 
 ## Intentionally **not** ported — infrastructure-level
 

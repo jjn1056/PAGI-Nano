@@ -193,6 +193,17 @@ subtest 'chat-showcase' => sub {
     $c->stop;
 };
 
+subtest 'duplex-http-stream' => sub {
+    # In-process (PAGI::Test::Client buffers, so this checks the handler runs and
+    # interleaves echo + tick; true full duplex is proven by the raw-socket
+    # examples/duplex-http-stream/probe.pl against pagi-server).
+    my $c = PAGI::Test::Client->new(app => load_example('duplex-http-stream'));
+    my $res = $c->post('/duplex', body => 'ping');
+    is $res->status, 200, 'streamed 200';
+    like $res->content, qr/echo: ping/, 'request body echoed';
+    like $res->content, qr/tick 1/, 'server tick interleaved';
+};
+
 subtest 'mounted-stash-state' => sub {
     my $c = PAGI::Test::Client->new(app => load_example('mounted-stash-state'), lifespan => 1);
     $c->start;
