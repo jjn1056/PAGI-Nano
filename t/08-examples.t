@@ -130,10 +130,15 @@ subtest 'flow-control' => sub {
 };
 
 subtest 'event-middleware' => sub {
-    my $c = PAGI::Test::Client->new(app => load_example('event-middleware'));
-    my $j = $c->get('/')->json;
-    is $j->{saw}, 'tick', 'handler saw the injected event';
-    is $j->{source}, 'middleware', 'injected by the middleware';
+    # The periodic ticker needs a real event loop, so in-process there are no
+    # ticks; we verify the streaming endpoint is wired. The NDJSON tick stream
+    # itself is shown by the real-server run in the example header.
+    my $c = PAGI::Test::Client->new(app => load_example('event-middleware'), lifespan => 1);
+    $c->start;
+    my $res = $c->get('/events');
+    is $res->status, 200, 'streaming endpoint responds';
+    like $res->content_type, qr{application/x-ndjson}, 'NDJSON content type';
+    $c->stop;
 };
 
 subtest 'full-demo' => sub {
