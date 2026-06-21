@@ -1,0 +1,8 @@
+/.build/
+/PAGI-Nano-*/
+/PAGI-Nano-*.tar.gz
+.DS_Store
+*.bak
+nytprof.out
+/.carton/
+/local/
