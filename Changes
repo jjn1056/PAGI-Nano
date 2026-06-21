@@ -1,0 +1,21 @@
+Revision history for PAGI-Nano
+
+0.001000  2026-06-20
+        - Initial release.
+        - app { } block-scoped collector returning an assembled PAGI app value
+          (no global state), built on PAGI::App::Router, PAGI::Middleware,
+          PAGI::Lifespan, and PAGI::App::File.
+        - Routing verbs get/post/put/patch/del/any; group (prefix + shared
+          middleware) and mount (nest any PAGI app); path placeholders
+          (:name, {name}, {name:regex}, *splat) map to the handler signature.
+        - Return-value coercion: PAGI::Response as-is; hashref/arrayref to JSON
+          (convert_blessed, so nested TO_JSON objects serialize); scalar to
+          text/plain; undef/return; a loud 500. Thrown respond-ables are sent.
+        - enable (app-wide) and [\@middleware] (route/group) event-layer
+          middleware; named middleware resolved like PAGI::Middleware::Builder.
+        - startup/shutdown lifecycle with app-lifetime shared state ($c->state).
+        - static file serving, custom not_found, websocket and sse (imperative),
+          and streaming request/response bodies.
+        - $c->params strong parameters via PAGI::StructuredParameters
+          (PAGI::Nano::Context::HTTP).
+        - Two run shapes: single-file app.pl and a lib/MyApp.pm modulino.

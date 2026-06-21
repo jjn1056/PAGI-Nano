@@ -390,6 +390,11 @@ branch-shared middleware. Groups nest.
 Nests any PAGI app (coerced via C<to_app>) under a prefix — another Nano app, a
 L<PAGI::Endpoint::Router>, or any coderef app.
 
+The router does not forward lifespan events to mounted apps, so a mounted Nano
+app's own C<startup>/C<shutdown> do not run; the outermost app owns lifecycle and
+mounted children share its C<state>. Write mountable apps to initialize their
+slice of state defensively.
+
 =head1 RESPONSES AND COERCION
 
 A handler returns a value, which Nano coerces:
@@ -411,7 +416,8 @@ catches the forgot-to-return bug rather than sending a silent empty 200.
 =back
 
 A handler that uses C<await> (for C<< $c->params >>, streaming, etc.) must be
-declared C<async sub>. For explicit control, the inherited context sugar
+declared C<async sub>, which requires C<use Future::AsyncAwait> in the file
+alongside C<use PAGI::Nano>. For explicit control, the inherited context sugar
 C<< $c->json($data, %opts) >>, C<< $c->text >>, C<< $c->html >>,
 C<< $c->redirect >> returns L<PAGI::Response> values.
 
