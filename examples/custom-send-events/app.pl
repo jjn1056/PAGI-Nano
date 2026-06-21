@@ -24,11 +24,11 @@ use PAGI::Nano;
 # imperative "emit events, let a middleware render" handler run over plain HTTP
 # (an ordinary coerced handler must return a response).
 
-# The handler: pure domain events on the raw send channel. ($c->send on an SSE
-# context is the SSE message convenience, so we reach the raw channel; on an HTTP
-# context it already is the raw send — PAGI::Context::send gives it on both.)
+# The handler: pure domain events on the raw send channel. $c->raw_send gives the
+# raw $send on any context — needed on the SSE route, whose $c->send is the SSE
+# message convenience; on the HTTP (raw) route $c->send would already do.
 my $emit_events = async sub ($c) {
-    my $emit = $c->PAGI::Context::send;
+    my $emit = $c->raw_send;
     await $emit->({ type => 'app.start' });
     for my $event (
         { name => 'status', data => 'online' },
