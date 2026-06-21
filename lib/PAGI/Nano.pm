@@ -17,7 +17,7 @@ use PAGI::Nano::Context::SSE;
 use Exporter 'import';
 our @EXPORT = qw(
     app
-    get post put patch del any
+    get post put patch del any raw
     group mount enable
     startup shutdown
     static not_found
@@ -162,6 +162,17 @@ sub _add_route {
     _register_name($name, $path) if defined $name;
 }
 
+# An imperative HTTP route (the escape hatch): the handler gets $c, owns its own
+# response (no return-value coercion), matches any method, and can drop fully to
+# raw PAGI via $c->scope / $c->receive / $c->send.
+sub raw {
+    my ($path, @rest) = @_;
+    my ($mw, $handler, $name) = _parse_route_args(@rest);
+    my $wrapped = _wrap_raw($handler, $path);
+    $COLLECTOR->{router}->any($path, ($mw ? ($mw) : ()), $wrapped);
+    _register_name($name, $path) if defined $name;
+}
+
 # --- grouping, mounting, static --------------------------------------------
 
 sub group {
@@ -270,15 +281,31 @@ sub _wrap_http {
     };
 }
 
-sub _wrap_socket {
-    my ($handler, $path) = @_;
+# Imperative handler wrapping: build the context, pass the ordered path params,
+# and return the handler's future as-is — no return-value coercion. Shared by the
+# WebSocket/SSE verbs and the raw escape hatch; they differ only in which context
+# they vend.
+sub _wrap_imperative {
+    my ($handler, $path, $make_context) = @_;
     my @names = _placeholder_names($path);
     return sub {
         my ($scope, $receive, $send) = @_;
-        my $c = _socket_context($scope, $receive, $send);
+        my $c = $make_context->($scope, $receive, $send);
         my @params = map { $scope->{path_params}{$_} } @names;
         return _invoke_handler($handler, $c, \@params);
     };
+}
+
+sub _wrap_socket {
+    my ($handler, $path) = @_;
+    return _wrap_imperative($handler, $path, \&_socket_context);
+}
+
+sub _wrap_raw {
+    my ($handler, $path) = @_;
+    return _wrap_imperative($handler, $path, sub {
+        PAGI::Nano::Context::HTTP->new(@_);
+    });
 }
 
 # Vend the Nano WebSocket/SSE context (which carries uri_for) by scope type,
@@ -474,9 +501,9 @@ are out of scope (use Valiant downstream and your own model).
 =head1 EXPORTS
 
 All of the following are exported by default:
-C<app>, C<get>, C<post>, C<put>, C<patch>, C<del>, C<any>, C<group>, C<mount>,
-C<enable>, C<startup>, C<shutdown>, C<static>, C<not_found>, C<websocket>,
-C<sse>, C<name>, C<middleware>.
+C<app>, C<get>, C<post>, C<put>, C<patch>, C<del>, C<any>, C<raw>, C<group>,
+C<mount>, C<enable>, C<startup>, C<shutdown>, C<static>, C<not_found>,
+C<websocket>, C<sse>, C<name>, C<middleware>.
 
 =head1 THE COLLECTOR
 
@@ -518,6 +545,26 @@ L</middleware> (or the C<[...]> shorthand) scopes middleware to it:
     any '/health' => sub ($c) { ... };
 
 Like the verbs above, but matches every HTTP method.
+
+=head2 raw
+
+    raw '/stream' => async sub ($c) {
+        await $c->respond($c->json({ ok => 1 }));   # send your own response
+    };
+
+The imperative escape hatch. Unlike C<get>/C<post>/etc., a C<raw> handler is
+B<not> coerced: it receives C<$c> (and any path placeholders) and is responsible
+for sending its own response — via C<< $c->respond >>, C<< $c->response->stream >>,
+or the raw protocol. Its return value is ignored. C<raw> matches every method
+(the handler dispatches on C<< $c->method >> if it cares).
+
+This is where you drop to raw PAGI mid-app: C<< $c->scope >>, C<< $c->receive >>,
+and C<< $c->send >> give the underlying C<($scope, $receive, $send)>, so a C<raw>
+handler can do anything a hand-written PAGI app can — emit custom send events for
+a middleware to render, stream a bespoke protocol, and so on — while still getting
+path-parameter and middleware sugar. Because it is uncoerced, B<a raw handler that
+never sends a response leaves the request hanging>; that is the handler's
+responsibility.
 
 =head2 group
 
