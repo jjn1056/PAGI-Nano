@@ -1,5 +1,5 @@
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use Test2::V0;
 use PAGI::Test::Client;
 use PAGI::Nano;
@@ -8,12 +8,12 @@ use PAGI::Nano;
 # to PAGI::App::Router; handler return values are coerced per the coercion table.
 
 my $app = app {
-    get '/string' => sub ($c) { 'hello' };
-    get '/hash'   => sub ($c) { { ok => 1 } };
-    get '/array'  => sub ($c) { [1, 2, 3] };
-    get '/resp'   => sub ($c) { $c->json({ made => 'by hand' }, status => 201) };
-    get '/explicit-404' => sub ($c) { $c->json({ error => 'nope' }, status => 404) };
-    get '/oops'   => sub ($c) { return };   # forgot to return -> loud error
+    get '/string' => sub { my ($c) = @_; 'hello' };
+    get '/hash'   => sub { my ($c) = @_; { ok => 1 } };
+    get '/array'  => sub { my ($c) = @_; [1, 2, 3] };
+    get '/resp'   => sub { my ($c) = @_; $c->json({ made => 'by hand' }, status => 201) };
+    get '/explicit-404' => sub { my ($c) = @_; $c->json({ error => 'nope' }, status => 404) };
+    get '/oops'   => sub { my ($c) = @_; return };   # forgot to return -> loud error
 };
 
 my $client = PAGI::Test::Client->new(app => $app);

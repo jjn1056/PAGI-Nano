@@ -1,7 +1,7 @@
 package PAGI::Nano::Context::HTTP;
 
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use parent -norequire, 'PAGI::Context::HTTP';
 use PAGI::Context;          # PAGI::Context::HTTP declares @ISA but does not load
 use PAGI::Context::HTTP;    # the base; pull both in when used outside the factory
@@ -14,7 +14,8 @@ use PAGI::StructuredParameters;
 # base factory's scope-type resolution does not down-cast us back to the plain
 # context class.
 
-sub new ($class, $scope, $receive, $send) {
+sub new {
+    my ($class, $scope, $receive, $send) = @_;
     return bless {
         scope   => $scope,
         receive => $receive,
@@ -22,7 +23,8 @@ sub new ($class, $scope, $receive, $send) {
     }, $class;
 }
 
-sub params ($self) {
+sub params {
+    my ($self) = @_;
     my $req = $self->req;
     return $req->is_json
         ? PAGI::StructuredParameters->from_data($req, $self)

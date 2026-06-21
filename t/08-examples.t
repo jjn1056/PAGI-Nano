@@ -1,11 +1,16 @@
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use Test2::V0;
 use Future::AsyncAwait;
 use File::Spec ();
 use FindBin ();
 use Cwd ();
 use PAGI::Test::Client;
+
+# The examples themselves use modern Perl (signatures etc.), so this harness can
+# only load them on a Perl new enough to parse them. The core framework (lib/ and
+# the other test files) runs back to 5.18; the examples do not.
+skip_all 'examples require Perl 5.40+ to load' if "$]" < 5.040;
 
 # Every ported example under examples/ must load as a runnable PAGI app and
 # behave. Examples are loaded exactly the way pagi-server loads them (set $0 and
@@ -16,7 +21,7 @@ use PAGI::Test::Client;
 
 my $examples = File::Spec->catdir($FindBin::Bin, File::Spec->updir, 'examples');
 
-sub load_example ($name) {
+sub load_example { my ($name) = @_;
     my $file = Cwd::abs_path(File::Spec->catfile($examples, $name, 'app.pl'));
     local $0 = $file;
     FindBin::again();
@@ -45,7 +50,7 @@ subtest 'utf8-echo' => sub {
 
 subtest 'websocket-echo' => sub {
     my $c = PAGI::Test::Client->new(app => load_example('websocket-echo'));
-    $c->websocket('/', sub ($ws) {
+    $c->websocket('/', sub { my ($ws) = @_;
         $ws->send_text('hi');
         is $ws->receive_text, 'echo: hi', 'echoed';
     });
@@ -72,7 +77,7 @@ subtest 'streaming-response' => sub {
 
 subtest 'sse-broadcaster' => sub {
     my $c = PAGI::Test::Client->new(app => load_example('sse-broadcaster'));
-    $c->sse('/events', sub ($sse) {
+    $c->sse('/events', sub { my ($sse) = @_;
         my $e = $sse->receive_event;
         is $e->{event}, 'tick', 'event type';
         is $e->{id}, '1', 'event id';
@@ -89,7 +94,7 @@ subtest 'connection-introspection' => sub {
 
 subtest 'bidirectional-websocket' => sub {
     my $c = PAGI::Test::Client->new(app => load_example('bidirectional-websocket'));
-    $c->websocket('/', sub ($ws) {
+    $c->websocket('/', sub { my ($ws) = @_;
         $ws->send_text('hi');
         my @got;
         for (1 .. 3) { my $m = eval { $ws->receive_text }; last unless defined $m; push @got, $m }
@@ -119,7 +124,7 @@ subtest 'background-tasks' => sub {
 
 subtest 'flow-control' => sub {
     my $c = PAGI::Test::Client->new(app => load_example('flow-control'));
-    $c->sse('/feed', sub ($sse) {
+    $c->sse('/feed', sub { my ($sse) = @_;
         is $sse->receive_event->{data}, 'reading 1', 'first reading (client keeping up)';
     });
 };
@@ -137,7 +142,7 @@ subtest 'full-demo' => sub {
     is $c->get('/')->json->{requests}, 1, 'lifespan state';
     is $c->post('/echo', json => { message => 'hi' })->json->{you_said}, 'hi', 'params echo';
     is $c->get('/stream')->content, "line 1\nline 2\nline 3\n", 'streaming';
-    $c->websocket('/ws/echo', sub ($ws) {
+    $c->websocket('/ws/echo', sub { my ($ws) = @_;
         $ws->send_text('x'); is $ws->receive_text, 'echo: x', 'ws echo';
     });
     $c->stop;
@@ -176,7 +181,7 @@ subtest 'chat-showcase' => sub {
     my $c = PAGI::Test::Client->new(app => load_example('chat-showcase'), lifespan => 1);
     $c->start;
     is $c->get('/api/rooms')->json, ['general'], 'seeded room';
-    $c->websocket('/ws/chat', sub ($ws) {
+    $c->websocket('/ws/chat', sub { my ($ws) = @_;
         $ws->send_json({ join => 'general', user => 'ada' });
         like $ws->receive_json->{system}, qr/joined general/, 'join ack';
         $ws->send_json({ text => 'hello' });

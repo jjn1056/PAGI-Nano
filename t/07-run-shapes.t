@@ -1,5 +1,5 @@
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use Test2::V0;
 use File::Spec ();
 use FindBin ();
@@ -8,7 +8,10 @@ use PAGI::Nano;
 
 # The two documented run shapes: a single-file app.pl whose last expression is
 # the app (what pagi-server loads via `do`), and a lib/MyApp.pm modulino that is
-# dual-use (to_app for tests, mountable into a larger app).
+# dual-use (to_app for tests, mountable into a larger app). Both example files use
+# modern Perl, so this harness needs a Perl new enough to parse them; the core
+# framework itself runs back to 5.18.
+skip_all 'run-shape examples require Perl 5.40+ to load' if "$]" < 5.040;
 
 my $examples = File::Spec->catdir($FindBin::Bin, File::Spec->updir, 'examples');
 
@@ -43,7 +46,7 @@ subtest 'modulino mounts inside a larger app (no rewrite)' => sub {
     require MyApp;
 
     my $parent = app {
-        get '/'      => sub ($c) { { app => 'parent' } };
+        get '/'      => sub { my ($c) = @_; { app => 'parent' } };
         mount '/tasks' => MyApp->to_app;
     };
 

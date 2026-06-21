@@ -1,7 +1,8 @@
 package PAGI::Nano;
 
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
+use Future;
 use Future::AsyncAwait;
 use Scalar::Util ();
 use Carp ();
@@ -30,7 +31,8 @@ our $COLLECTOR;
 
 # --- the collector ----------------------------------------------------------
 
-sub app :prototype(&) ($block) {
+sub app (&) {
+    my ($block) = @_;
     local $COLLECTOR = {
         router   => PAGI::App::Router->new,
         app_mw   => [],
@@ -41,7 +43,8 @@ sub app :prototype(&) ($block) {
     return _assemble($COLLECTOR);
 }
 
-sub _assemble ($collector) {
+sub _assemble {
+    my ($collector) = @_;
     my $app = $collector->{router}->to_app;
 
     $app = _wrap_with_middleware($app, $collector->{app_mw})
@@ -60,12 +63,14 @@ sub _assemble ($collector) {
 
 # Wrap $app in app-wide middleware, mirroring PAGI::App::Router's event-layer
 # chain (coderef with a $next, or an object with ->call).
-sub _wrap_with_middleware ($app, $mws) {
+sub _wrap_with_middleware {
+    my ($app, $mws) = @_;
     my $chain = $app;
     for my $mw (reverse @$mws) {
         my $next = $chain;
         if (ref($mw) eq 'CODE') {
-            $chain = async sub ($scope, $receive, $send) {
+            $chain = async sub {
+                my ($scope, $receive, $send) = @_;
                 await $mw->($scope, $receive, $send, async sub {
                     # Forward a transformed channel when the middleware passes
                     # one; otherwise continue with the inherited triple. Matches
@@ -77,7 +82,8 @@ sub _wrap_with_middleware ($app, $mws) {
             };
         }
         else {
-            $chain = async sub ($scope, $receive, $send) {
+            $chain = async sub {
+                my ($scope, $receive, $send) = @_;
                 await $mw->call($scope, $receive, $send, $next);
             };
         }
@@ -87,19 +93,21 @@ sub _wrap_with_middleware ($app, $mws) {
 
 # --- HTTP verbs -------------------------------------------------------------
 
-sub get    ($path, @rest) { _add_route('GET',    $path, @rest) }
-sub post   ($path, @rest) { _add_route('POST',   $path, @rest) }
-sub put    ($path, @rest) { _add_route('PUT',    $path, @rest) }
-sub patch  ($path, @rest) { _add_route('PATCH',  $path, @rest) }
-sub del    ($path, @rest) { _add_route('DELETE', $path, @rest) }
+sub get    { _add_route('GET',    @_) }
+sub post   { _add_route('POST',   @_) }
+sub put    { _add_route('PUT',    @_) }
+sub patch  { _add_route('PATCH',  @_) }
+sub del    { _add_route('DELETE', @_) }
 
-sub any ($path, @rest) {
+sub any {
+    my ($path, @rest) = @_;
     my ($mw, $handler) = _split_mw_handler(@rest);
     my $wrapped = _wrap_http($handler, $path);
     $COLLECTOR->{router}->any($path, ($mw ? ($mw) : ()), $wrapped);
 }
 
-sub _add_route ($method, $path, @rest) {
+sub _add_route {
+    my ($method, $path, @rest) = @_;
     my ($mw, $handler) = _split_mw_handler(@rest);
     my $wrapped = _wrap_http($handler, $path);
     $COLLECTOR->{router}->route($method, $path, ($mw ? ($mw) : ()), $wrapped);
@@ -107,44 +115,51 @@ sub _add_route ($method, $path, @rest) {
 
 # --- grouping, mounting, static --------------------------------------------
 
-sub group ($prefix, @rest) {
+sub group {
+    my ($prefix, @rest) = @_;
     my ($mw, $block) = _split_mw_handler(@rest);
     # The router manages the prefix/middleware stack; our verbs register into the
     # same router during the block, so they are prefixed and branch-wrapped.
     $COLLECTOR->{router}->group($prefix, ($mw ? ($mw) : ()), sub { $block->() });
 }
 
-sub mount ($prefix, $app) {
+sub mount {
+    my ($prefix, $app) = @_;
     $COLLECTOR->{router}->mount($prefix, $app);
 }
 
-sub static ($url, $dir) {
+sub static {
+    my ($url, $dir) = @_;
     require PAGI::App::File;
     $COLLECTOR->{router}->mount($url, PAGI::App::File->new(root => $dir));
 }
 
 # --- middleware, lifecycle, 404 --------------------------------------------
 
-sub enable ($spec, %args) {
+sub enable {
+    my ($spec, %args) = @_;
     push @{$COLLECTOR->{app_mw}}, _normalize_middleware($spec, %args);
 }
 
-sub startup  ($cb) { push @{$COLLECTOR->{startup}},  $cb }
-sub shutdown ($cb) { push @{$COLLECTOR->{shutdown}}, $cb }
+sub startup  { push @{$COLLECTOR->{startup}},  $_[0] }
+sub shutdown { push @{$COLLECTOR->{shutdown}}, $_[0] }
 
-sub not_found ($handler) {
+sub not_found {
+    my ($handler) = @_;
     $COLLECTOR->{router}{not_found} = _wrap_http($handler, '');
 }
 
 # --- WebSocket / SSE (imperative; not coerced) ------------------------------
 
-sub websocket ($path, @rest) {
+sub websocket {
+    my ($path, @rest) = @_;
     my ($mw, $handler) = _split_mw_handler(@rest);
     my $wrapped = _wrap_socket($handler, $path);
     $COLLECTOR->{router}->websocket($path, ($mw ? ($mw) : ()), $wrapped);
 }
 
-sub sse ($path, @rest) {
+sub sse {
+    my ($path, @rest) = @_;
     my ($mw, $handler) = _split_mw_handler(@rest);
     my $wrapped = _wrap_socket($handler, $path);
     $COLLECTOR->{router}->sse($path, ($mw ? ($mw) : ()), $wrapped);
@@ -154,48 +169,60 @@ sub sse ($path, @rest) {
 
 # Extract a route's :placeholder names in path order so they can be passed to the
 # handler signature after $c. Supports :name, {name}, {name:regex}, and *splat.
-sub _placeholder_names ($path) {
+sub _placeholder_names {
+    my ($path) = @_;
     my @names;
     while ($path =~ /\{(\w+)(?::[^}]+)?\}|\*(\w+)|:(\w+)/g) {
-        push @names, $1 // $2 // $3;
+        push @names, defined $1 ? $1 : defined $2 ? $2 : $3;
     }
     return @names;
 }
 
-sub _wrap_http ($handler, $path) {
+# Error handling uses Future combinators rather than try/catch so the core runs
+# on Perl back to 5.18. A die in the ->then callback (e.g. an uncoercible return)
+# becomes a failed Future and is handled by ->else.
+sub _wrap_http {
+    my ($handler, $path) = @_;
     my @names = _placeholder_names($path);
-    return async sub ($scope, $receive, $send) {
+    return sub {
+        my ($scope, $receive, $send) = @_;
         my $c = PAGI::Nano::Context::HTTP->new($scope, $receive, $send);
         my @params = map { $scope->{path_params}{$_} } @names;
 
-        my $response;
-        try {
-            my $res = $handler->($c, @params);
-            $res = await $res if Scalar::Util::blessed($res) && $res->isa('Future');
-            $response = _coerce($res);
-        }
-        catch ($err) {
+        return _invoke_handler($handler, $c, \@params)->then(sub {
+            my ($res) = @_;
+            return $c->respond(_coerce($res));
+        })->else(sub {
+            my ($err) = @_;
             # The "featherweight die-a-respond-able" escape hatch: a thrown
             # respond-able value is sent as-is; anything else propagates and
             # becomes a 500 (rendered by enable 'ErrorHandler' or the server).
-            die $err
-                unless Scalar::Util::blessed($err) && $err->can('respond');
-            $response = $err;
-        }
-
-        await $c->respond($response);
+            return $c->respond($err)
+                if Scalar::Util::blessed($err) && $err->can('respond');
+            return Future->fail($err);
+        });
     };
 }
 
-sub _wrap_socket ($handler, $path) {
+sub _wrap_socket {
+    my ($handler, $path) = @_;
     my @names = _placeholder_names($path);
-    return async sub ($scope, $receive, $send) {
+    return sub {
+        my ($scope, $receive, $send) = @_;
         my $c = PAGI::Context->new($scope, $receive, $send);
         my @params = map { $scope->{path_params}{$_} } @names;
-        my $res = $handler->($c, @params);
-        await $res if Scalar::Util::blessed($res) && $res->isa('Future');
-        return;
+        return _invoke_handler($handler, $c, \@params);
     };
+}
+
+# Call a handler and normalize its result to a Future, capturing a synchronous
+# die from a non-async handler as a failed Future.
+sub _invoke_handler {
+    my ($handler, $c, $params) = @_;
+    my $res = eval { $handler->($c, @$params) };
+    return Future->fail($@) if $@;
+    return $res if Scalar::Util::blessed($res) && $res->isa('Future');
+    return Future->done($res);
 }
 
 # JSON encoder for coerced bodies. convert_blessed lets any object with a
@@ -203,7 +230,8 @@ sub _wrap_socket ($handler, $path) {
 my $JSON = JSON::MaybeXS->new(utf8 => 1, canonical => 1, convert_blessed => 1);
 
 # The coercion table.
-sub _coerce ($res) {
+sub _coerce {
+    my ($res) = @_;
     if (Scalar::Util::blessed($res)) {
         return $res if $res->can('respond');    # a PAGI::Response (sent as-is)
         Carp::croak('PAGI::Nano handler returned an uncoercible '
@@ -233,7 +261,8 @@ sub _coerce ($res) {
 # Turn a middleware spec (name string, instance, or coderef) into something the
 # router/chain accepts: a coderef ($scope,$receive,$send,$next) or an object
 # with ->call. Names are resolved the way `enable` resolves them.
-sub _normalize_middleware ($spec, %args) {
+sub _normalize_middleware {
+    my ($spec, %args) = @_;
     return $spec if ref($spec) eq 'CODE';
     return $spec if Scalar::Util::blessed($spec) && $spec->can('call');
 
@@ -246,12 +275,14 @@ sub _normalize_middleware ($spec, %args) {
     return $class->new(%args);
 }
 
-sub _normalize_middleware_list ($specs) {
+sub _normalize_middleware_list {
+    my ($specs) = @_;
     return [ map { _normalize_middleware($_) } @$specs ];
 }
 
 # Split (\@middleware, $target) or ($target); normalize any middleware names.
-sub _split_mw_handler (@rest) {
+sub _split_mw_handler {
+    my @rest = @_;
     if (@rest >= 2 && ref($rest[0]) eq 'ARRAY') {
         my ($mw, $target) = @rest;
         return (_normalize_middleware_list($mw), $target);

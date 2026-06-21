@@ -1,5 +1,5 @@
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use Test2::V0;
 use Future::AsyncAwait;
 use File::Temp ();
@@ -21,23 +21,23 @@ my $dir = File::Temp->newdir;
 my @shutdown_log;
 
 my $inner = app {
-    get '/where' => sub ($c) { { mounted => 1 } };
+    get '/where' => sub { my ($c) = @_; { mounted => 1 } };
 };
 
 my $app = app {
-    startup  async sub ($state) { $state->{boot} = 'up'; $state->{hits} = 0 };
-    shutdown async sub ($state) { push @shutdown_log, "down after $state->{boot}" };
+    startup  async sub { my ($state) = @_; $state->{boot} = 'up'; $state->{hits} = 0 };
+    shutdown async sub { my ($state) = @_; push @shutdown_log, "down after $state->{boot}" };
 
     static '/assets' => "$dir";
 
-    get '/state' => sub ($c) {
+    get '/state' => sub { my ($c) = @_;
         $c->state->{hits}++;
         { boot => $c->state->{boot}, hits => $c->state->{hits} };
     };
 
     mount '/sub' => $inner;
 
-    not_found sub ($c) { $c->json({ error => 'no such route' }, status => 404) };
+    not_found sub { my ($c) = @_; $c->json({ error => 'no such route' }, status => 404) };
 };
 
 # lifespan => 1 enables the lifespan protocol; ->start fires startup, ->stop

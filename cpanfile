@@ -1,7 +1,8 @@
 # PAGI-Nano dependencies
 # Install with: cpanm --installdeps .
 
-requires 'perl', '5.040';
+# The core (lib/) runs on Perl back to 5.18; the examples use newer syntax.
+requires 'perl', '5.018';
 
 # Async primitives. Nano apps and handlers are written against Futures; the
 # server owns the event loop.

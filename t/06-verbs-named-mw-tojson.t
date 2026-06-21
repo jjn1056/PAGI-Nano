@@ -1,5 +1,5 @@
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use Test2::V0;
 use PAGI::Test::Client;
 use PAGI::Nano;
@@ -9,17 +9,17 @@ use PAGI::Nano;
 
 # A tiny domain object that knows how to JSON-serialize itself.
 package Money {
-    sub new ($class, $cents) { bless { cents => $cents }, $class }
-    sub TO_JSON ($self, @) { sprintf('$%.2f', $self->{cents} / 100) }
+    sub new { my ($class, $cents) = @_; bless { cents => $cents }, $class }
+    sub TO_JSON { my ($self) = @_; sprintf('$%.2f', $self->{cents} / 100) }
 }
 
 my $app = app {
     enable 'ContentLength';              # named app-wide middleware, resolved to a class
 
-    any '/any'    => sub ($c) { { method => $c->method } };
-    del '/thing/:id' => sub ($c, $id) { { deleted => $id } };
+    any '/any'    => sub { my ($c) = @_; { method => $c->method } };
+    del '/thing/:id' => sub { my ($c, $id) = @_; { deleted => $id } };
 
-    get '/price' => sub ($c) { { total => Money->new(1299) } };
+    get '/price' => sub { my ($c) = @_; { total => Money->new(1299) } };
 };
 
 my $client = PAGI::Test::Client->new(app => $app);

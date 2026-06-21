@@ -1,5 +1,5 @@
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use Test2::V0;
 use Future::AsyncAwait;
 use PAGI::Response;
@@ -19,7 +19,7 @@ subtest 'is a real PAGI::Context::HTTP with inherited sugar' => sub {
 };
 
 subtest 'params picks body for form posts' => sub {
-    my $client = PAGI::Test::Client->new(app => async sub ($scope, $receive, $send) {
+    my $client = PAGI::Test::Client->new(app => async sub { my ($scope, $receive, $send) = @_;
         my $c = PAGI::Nano::Context::HTTP->new($scope, $receive, $send);
         my $clean = await $c->params->permitted('a', 'b');
         await PAGI::Response->json($clean)->respond($send);
@@ -29,7 +29,7 @@ subtest 'params picks body for form posts' => sub {
 };
 
 subtest 'params picks data for json posts' => sub {
-    my $client = PAGI::Test::Client->new(app => async sub ($scope, $receive, $send) {
+    my $client = PAGI::Test::Client->new(app => async sub { my ($scope, $receive, $send) = @_;
         my $c = PAGI::Nano::Context::HTTP->new($scope, $receive, $send);
         my $clean = await $c->params->permitted('title', +{ tags => [] });
         await PAGI::Response->json($clean)->respond($send);

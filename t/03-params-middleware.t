@@ -1,5 +1,5 @@
-use v5.40;
-use experimental 'signatures';
+use strict;
+use warnings;
 use Test2::V0;
 use Future::AsyncAwait;
 use PAGI::Test::Client;
@@ -11,8 +11,8 @@ use PAGI::Nano;
 my @trail;   # records middleware execution order across a request
 
 # A coderef event-layer middleware that tags the request as it passes through.
-sub tagger ($label) {
-    return async sub ($scope, $receive, $send, $next) {
+sub tagger { my ($label) = @_;
+    return async sub { my ($scope, $receive, $send, $next) = @_;
         push @trail, "enter:$label";
         await $next->($scope, $receive, $send);
         push @trail, "leave:$label";
@@ -22,21 +22,21 @@ sub tagger ($label) {
 my $app = app {
     enable tagger('app');
 
-    get '/u/:uid/p/:pid' => sub ($c, $uid, $pid) {
+    get '/u/:uid/p/:pid' => sub { my ($c, $uid, $pid) = @_;
         { uid => $uid, pid => $pid };
     };
 
-    get '/tagged' => [tagger('route')] => sub ($c) { { ok => 1 } };
+    get '/tagged' => [tagger('route')] => sub { my ($c) = @_; { ok => 1 } };
 
     group '/api' => [tagger('group')] => sub {
-        get '/ping' => sub ($c) { { pong => 1 } };
+        get '/ping' => sub { my ($c) = @_; { pong => 1 } };
     };
 
-    post '/tasks' => async sub ($c) {
+    post '/tasks' => async sub { my ($c) = @_;
         my $attrs = await $c->params->required(
             'title',
             +{ tags => [] },
-            sub ($ctx, $missing) {
+            sub { my ($ctx, $missing) = @_;
                 $ctx->json({ error => 'missing', fields => $missing }, status => 400);
             },
         );
