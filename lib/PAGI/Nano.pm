@@ -666,8 +666,12 @@ whole app (including mounted sub-apps); a duplicate name is a loud error.
     get '/x' => middleware('Auth', $coderef) => sub ($c) { ... };
 
 A marker that scopes the given middleware to the route (the C<[...]> arrayref is
-the everyday shorthand). Accepts the same names, instances, and coderefs as
-L</enable>.
+the everyday shorthand). Each element is a middleware spec — a name, an instance,
+or a coderef — resolved the same way L</enable> resolves a name. Unlike
+C<enable>, the route forms take no per-name constructor arguments: every element
+is its own spec, so to configure a name-based middleware, pre-instantiate it
+(C<< [ PAGI::Middleware::Session->new(secret => '...') ] >>) and pass the
+instance.
 
 =head2 C<< $c->uri_for >>
 
@@ -710,8 +714,12 @@ HTTP handler.
 
 =head1 STREAMING, WEBSOCKET, SSE
 
-WebSocket and SSE handlers are imperative and return nothing (they are not
-coerced):
+WebSocket and SSE handlers are imperative: like L</raw>, they own the connection,
+return nothing, and are B<not> coerced. Both take the same
+C<< PATH => [\@middleware] => $handler >> shape as the HTTP verbs (middleware and
+L</name> markers are optional and may appear in any order).
+
+=head2 websocket
 
     websocket '/echo' => async sub ($c) {
         my $ws = $c->websocket;
@@ -719,10 +727,20 @@ coerced):
         await $ws->each_json(async sub ($msg) { await $ws->send_json({ echo => $msg }) });
     };
 
+Registers a WebSocket route. The handler gets the L<PAGI::Nano::Context::WebSocket>
+context (C<< $c->websocket >> for the socket API, C<< $c->uri_for >> for links).
+
+=head2 sse
+
     sse '/events' => async sub ($c) {
         my $s = $c->sse;
         for my $n (1 .. 5) { await $s->send("tick $n") }
     };
+
+Registers a Server-Sent Events route. The handler gets the
+L<PAGI::Nano::Context::SSE> context; C<< $c->send >> is the C<sse.send>
+convenience, and C<< $c->raw_send >> reaches the raw channel for custom event
+types.
 
 Streaming uses the response writer and request body stream:
 
@@ -737,9 +755,13 @@ Streaming uses the response writer and request body stream:
 =head1 STRONG PARAMETERS
 
 C<< $c->params >> returns a request-bound L<PAGI::StructuredParameters::Request>
-selecting the source by content-type. Because reading a request body is
-asynchronous, its C<permitted>/C<required> are awaited. See
-L<PAGI::Nano::Context::HTTP> and L<PAGI::StructuredParameters>.
+selecting the source by content-type. The terminal C<permitted> (filter to a
+whitelist) and C<required> (whitelist plus a mandatory on-missing callback) are
+awaited, because reading a request body is asynchronous. The chainable
+C<namespace> (scope the rules to a key prefix) and C<flatten_array_value>
+(control array flattening for form sources) shape parsing before them. See
+L<PAGI::Nano::Context::HTTP> and L<PAGI::StructuredParameters> for the full rule
+grammar.
 
 =head1 RUNNING
 

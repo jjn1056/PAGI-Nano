@@ -62,7 +62,10 @@ is available — C<req>/C<request>, C<response>/C<resp>, C<respond>, C<method>,
 C<state>, C<path_param>, and the response sugar C<json>/C<text>/C<html>/
 C<redirect>. A Nano handler receives one of these as C<$c>.
 
-The additions are L</params> and L</uri_for>.
+The additions are L</params> and L</uri_for>. The inherited
+C<< $c->raw_send >> (the raw PAGI C<$send> coderef; see
+L<PAGI::Context/raw_send>) is also available for handlers that drop to the
+channel directly.
 
 =head1 METHODS
 
