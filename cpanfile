@@ -15,6 +15,10 @@ requires 'PAGI::Tools', '0.002000';
 # The strong-parameters engine behind $c->params.
 requires 'PAGI::StructuredParameters', '0.001000';
 
+# Used directly to encode coerced hash/array returns as JSON. Already a
+# PAGI-Tools dependency; declared explicitly because Nano use()s it itself.
+requires 'JSON::MaybeXS', '1.004003';
+
 # Testing
 on 'test' => sub {
     requires 'Test2::V0', '0.000159';
