@@ -13,7 +13,7 @@
 
 1. **The DSL produces a value, not global state.** `app { ... }` runs a block-scoped collector (the same `local`-scoped technique `PAGI::Middleware::Builder`'s `builder { }` already uses) and *returns* an assembled PAGI app. This avoids the global-state flaw that forced Dancer's v1→v2 rewrite. The result is composable (mount it), nestable, testable, and many-per-process.
 2. **No silo, no cliff.** The DSL is thin sugar over the exact PAGI objects you would use by hand — `PAGI::Context`, `PAGI::Response`, `PAGI::App::Router`, the builder, `PAGI::Lifespan`. You can drop to raw PAGI mid-app, and you graduate to structured PAGI with no rewrite (a Nano app already *is* a PAGI app).
-3. **Anti-magic, with one deliberate exception.** The only "magic" is the return-value coercion, which is *local and predictable* (a return-value convention visible at the call site), not action-at-a-distance. `@INC` is never touched by the framework.
+3. **Anti-magic, with deliberate exceptions.** The headline "magic" is the return-value coercion, which is *local and predictable* (a return-value convention visible at the call site), not action-at-a-distance. The one other convention is that an app with named routes injects a namespaced `pagi.nano.routes` entry onto each request scope, carrying the flat name registry that `$c->uri_for` resolves against (this is what lets links resolve across mounts). Both are bounded and namespaced; `@INC` is never touched by the framework.
 4. **Separation of concerns:** Nano *shapes* input (strong parameters) and *routes/responds*; **validation is out of scope** (use Valiant, a downstream dependency, outside Nano); **persistence is out of scope** (your code).
 
 ## The surface (reference example)
@@ -21,8 +21,9 @@
 ```perl
 use v5.40;
 use experimental 'signatures';
-use PAGI::Nano;   # app · get post put patch del any · group mount · enable
+use PAGI::Nano;   # app · get post put patch del any raw · group mount · enable
                   # startup shutdown · static · not_found · websocket sse
+                  # name middleware (route markers); $c->uri_for builds links
 
 my $app = app {
     startup async sub ($state) { $state->{tasks} = []; $state->{boot} = time };
@@ -78,7 +79,7 @@ Nano is assembly + sugar; it introduces little new runtime.
 
 | Unit | Responsibility | Built on |
 |---|---|---|
-| `lib/PAGI/Nano.pm` | The DSL: exports, the `app { }` block-scoped collector, the route/group/mount/enable/lifecycle/static/not_found verbs, the handler wrapper (Context construction, path-param passing, return-value coercion, error catch). | `PAGI::App::Router`, `PAGI::Middleware::Builder`, `PAGI::Lifespan`, `PAGI::App::File` |
+| `lib/PAGI/Nano.pm` | The DSL: exports, the `app { }` block-scoped collector, the route/group/mount/enable/lifecycle/static/not_found verbs, the handler wrapper (Context construction, path-param passing, return-value coercion, error catch). | `PAGI::App::Router`, `PAGI::Lifespan`, `PAGI::App::File` (the `local`-scoped collector borrows `PAGI::Middleware::Builder`'s *technique*, but Nano composes app-wide middleware itself rather than using Builder) |
 | `lib/PAGI/Context/HTTP.pm` (modify) | Add `json` / `text` / `html` / `redirect` response sugar (delegating to `->response->…`, returning a `PAGI::Response` value). Shared with `Endpoint` handlers. | `PAGI::Response` |
 | `lib/PAGI/Request/StructuredParameters.pm` (new) + `lib/PAGI/Request.pm` (modify) | Strong-parameters: `$req->structured_body/structured_query/structured_data` and the params object (`permitted`/`required`/`namespace`/`flatten_array_value`). A no-deps port of `Catalyst::TraitFor::Request::StructuredParameters`'s core, decoupled from Catalyst. `$c->params` is the Nano-facing DWIM alias. | core Perl only |
 
@@ -93,7 +94,7 @@ For each HTTP route, Nano wraps the user's `sub ($c, @path_params)`:
 2. Pull the route's declared `:placeholders` from `$scope->{path_params}` in path order and call `$handler->($c, @ordered_params)`.
 3. Coerce the return value (see below) into a `PAGI::Response`.
 4. Send it via `$c->respond($res)`.
-5. Catch anything thrown: a respond-able (or coercible) value is sent as-is; anything else yields a 500.
+5. Catch anything thrown: a respond-able value is sent as-is; anything else yields a 500.
 
 WebSocket/SSE handlers are imperative (`$c->websocket` / `$c->sse`, return nothing) and are **not** coerced.
 
@@ -140,7 +141,7 @@ For explicit control: `$c->json($data, %opts)`, `$c->text($str, %opts)`, `$c->ht
 
 - `static '/url' => 'dir/'` — wraps `PAGI::App::File->new(root => 'dir/')` and mounts it at `/url`.
 - `not_found sub ($c) { … }` — sets `PAGI::App::Router`'s `not_found` slot (the handler is wrapped + coerced like any other).
-- Errors: uncaught exceptions → 500 by default; a thrown respond-able/coercible → sent; `enable 'ErrorHandler'` customizes rendering.
+- Errors: uncaught exceptions → 500 by default; a thrown respond-able → sent; `enable 'ErrorHandler'` customizes rendering.
 
 ### Streaming, WebSocket, SSE
 
@@ -183,7 +184,7 @@ Flat form keys (`name.first`, `email[0]`) are reconstructed into nested structur
 
 ### Error model interaction (resolves the B2 question)
 
-`required`'s mandatory on-missing callback makes the failure response *explicit and chosen at the call site*, so the throw is intentional plumbing, not a mystery die. This is the B2 "featherweight die-a-respond-able" escape hatch finally earning its keep — bounded, opt-in, never silent. Nano's dispatch is its consumer: thrown respond-able/coercible → sent; otherwise → 500.
+`required`'s mandatory on-missing callback makes the failure response *explicit and chosen at the call site*, so the throw is intentional plumbing, not a mystery die. This is the B2 "featherweight die-a-respond-able" escape hatch finally earning its keep — bounded, opt-in, never silent. Nano's dispatch is its consumer: a thrown respond-able → sent; otherwise → 500. Only respond-ables are sent, not bare coercible values — a thrown string or hashref stays a 500, so an accidental `die` never leaks as a 200. To send a response by throwing, throw one (`die $c->json(...)`), which carries its own status.
 
 ## App layout and running
 
