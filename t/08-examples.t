@@ -166,6 +166,26 @@ subtest 'contact-form' => sub {
     my $bad = $c->post('/submit', form => { email => 'a@b.com' });
     is $bad->status, 400, 'missing field rejected';
     is $bad->json->{fields}, ['message'], 'reports the missing field';
+
+    # A multipart submission exercises the optional file-upload branch
+    # ($c->req->upload('attachment')), which the urlencoded form cannot reach.
+    my $boundary = 'NanoContactBoundary';
+    my $body = join "\r\n",
+        "--$boundary",
+        'Content-Disposition: form-data; name="email"', '', 'a@b.com',
+        "--$boundary",
+        'Content-Disposition: form-data; name="message"', '', 'with a file',
+        "--$boundary",
+        'Content-Disposition: form-data; name="attachment"; filename="note.txt"',
+        'Content-Type: text/plain', '', 'file body contents',
+        "--$boundary--", '';
+    my $up = $c->post('/submit',
+        body    => $body,
+        headers => { 'Content-Type' => "multipart/form-data; boundary=$boundary" },
+    );
+    is $up->status, 201, 'multipart submission accepted';
+    is $up->json->{attachment}{filename}, 'note.txt',
+        'the uploaded file is surfaced through $c->req->upload';
 };
 
 subtest 'periodic-events' => sub {
