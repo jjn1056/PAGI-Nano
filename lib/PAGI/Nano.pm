@@ -278,11 +278,20 @@ sub _placeholder_names {
     return @names;
 }
 
+# A route declared without a handler coderef is a loud build-time error (caught
+# while app { } runs) rather than a "Not a CODE reference" 500 at first request.
+sub _assert_handler {
+    my ($handler, $path) = @_;
+    Carp::croak("route '$path' is missing a handler (expected a coderef)")
+        unless ref $handler eq 'CODE';
+}
+
 # Error handling uses Future combinators rather than try/catch so the core runs
 # on Perl back to 5.18. A die in the ->then callback (e.g. an uncoercible return)
 # becomes a failed Future and is handled by ->else.
 sub _wrap_http {
     my ($handler, $path) = @_;
+    _assert_handler($handler, $path);
     my @names = _placeholder_names($path);
     return sub {
         my ($scope, $receive, $send) = @_;
@@ -310,6 +319,7 @@ sub _wrap_http {
 # they vend.
 sub _wrap_imperative {
     my ($handler, $path, $make_context) = @_;
+    _assert_handler($handler, $path);
     my @names = _placeholder_names($path);
     return sub {
         my ($scope, $receive, $send) = @_;

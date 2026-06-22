@@ -80,6 +80,12 @@ subtest 'a thrown respond-able is sent as-is' => sub {
     is $res->json, { thrown => 1 }, 'the thrown response body is sent';
 };
 
+subtest 'a route without a handler is a loud build-time error' => sub {
+    my $err = dies { app { get '/x' } };
+    like $err, qr/missing a handler/,
+        'declaring a route with no handler dies at app { } build, not at request time';
+};
+
 subtest '404 for unknown route (router default)' => sub {
     my $res = $client->get('/nowhere');
     is $res->status, 404, 'unmatched route is 404';
