@@ -397,7 +397,8 @@ sub _normalize_middleware {
     Carp::croak('Invalid middleware: expected a name, instance, or coderef')
         if ref $spec;
 
-    my $class = "PAGI::Middleware::$spec" =~ s{^.+\^}{}r;
+    # A leading ^ escapes the default prefix: use the rest of the name verbatim.
+    my $class = $spec =~ /^\^/ ? substr($spec, 1) : "PAGI::Middleware::$spec";
     my $file = ($class =~ s{::}{/}gr) . '.pm';
     require $file;
     return $class->new(%args);

@@ -2,6 +2,8 @@ use strict;
 use warnings;
 use Test2::V0;
 use Future::AsyncAwait;
+use FindBin ();
+use lib "$FindBin::Bin/lib";
 use PAGI::Test::Client;
 use PAGI::Nano;
 
@@ -83,6 +85,17 @@ subtest 'POST failure: required missing -> callback response thrown and sent' =>
     my $res = $client->post('/tasks', json => { tags => ['x'] });
     is $res->status, 400, 'missing required title -> 400';
     is $res->json, { error => 'missing', fields => ['title'] }, 'callback shaped the body';
+};
+
+subtest "a leading ^ escapes the PAGI::Middleware:: prefix" => sub {
+    @NanoTest::Mw::TRAIL = ();
+    my $app = app {
+        enable '^NanoTest::Mw', tag => 'escaped';
+        get '/' => sub { my ($c) = @_; { ok => 1 } };
+    };
+    PAGI::Test::Client->new(app => $app)->get('/');
+    is \@NanoTest::Mw::TRAIL, ['escaped'],
+        'enable ^Class resolved NanoTest::Mw verbatim, not PAGI::Middleware::NanoTest::Mw';
 };
 
 done_testing;
