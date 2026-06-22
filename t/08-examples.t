@@ -292,6 +292,82 @@ subtest 'named-routes' => sub {
     is $user->{back_home}, '/', 'mount links to a name in the parent';
 };
 
+subtest 'rest-resource' => sub {
+    my $c = PAGI::Test::Client->new(app => load_example('rest-resource'));
+    is $c->get('/widgets')->json, [], 'empty collection';
+    my $made = $c->post('/widgets', json => { name => 'sprocket' });
+    is $made->status, 201, 'POST creates -> 201';
+    my $id = $made->json->{id};
+    is $c->get("/widgets/$id")->json->{name}, 'sprocket', 'GET one';
+    is $c->put("/widgets/$id", json => { name => 'cog', qty => 3 })->json,
+        { id => $id, name => 'cog', qty => 3 }, 'PUT replaces';
+    is $c->patch("/widgets/$id", json => { qty => 9 })->json->{qty}, 9, 'PATCH merges qty';
+    is $c->patch("/widgets/$id", json => { qty => 9 })->json->{name}, 'cog', 'PATCH leaves name';
+    is $c->delete("/widgets/$id")->status, 204, 'DELETE -> 204 No Content';
+    is $c->get("/widgets/$id")->status, 404, 'gone -> 404';
+    is $c->get('/no/such/path')->status, 404, 'not_found -> 404';
+};
+
+subtest 'strong-params-deep' => sub {
+    my $c = PAGI::Test::Client->new(app => load_example('strong-params-deep'));
+    my $order = $c->post('/orders', json => {
+        customer => 'Ada',
+        address  => { street => '1 Calc Ln', city => 'London' },
+        coupons  => ['EARLY', 'VIP'],
+        items    => [ { sku => 'A1', qty => '2' }, { sku => 'B2', qty => '1' } ],
+        junk     => 'dropped',
+    });
+    is $order->status, 201, 'valid nested order accepted';
+    is $order->json->{accepted}, {
+        customer => 'Ada',
+        address  => { street => '1 Calc Ln', city => 'London' },
+        coupons  => ['EARLY', 'VIP'],
+        items    => [ { sku => 'A1', qty => '2' }, { sku => 'B2', qty => '1' } ],
+    }, 'nested hash, bare array, and array-of-hashes all shaped; junk dropped';
+
+    is $c->post('/orders', json => { address => { city => 'x' } })->status, 400,
+        'missing required customer -> 400';
+
+    my $prof = $c->post('/profile', form => { 'user.name' => 'Ada', 'user.email' => 'ada@calc.dev', spam => 'x' });
+    is $prof->json, { user => { name => 'Ada', email => 'ada@calc.dev' } },
+        'namespace + dotted flat keys reconstruct a nested hash; spam dropped';
+};
+
+subtest 'sessions' => sub {
+    my $c = PAGI::Test::Client->new(app => load_example('sessions'));
+    my $first = $c->get('/');
+    is $first->json->{you_are}, 'guest', 'no session -> guest';
+    # carry the session cookie forward
+    my $cookie = $first->header('set-cookie');
+    ok $cookie, 'a session cookie was set';
+    (my $pair = $cookie) =~ s/;.*//;     # name=value
+    my $login = $c->post('/login', form => { user => 'ada' }, headers => { Cookie => $pair });
+    is $login->status, 303, 'login redirects (Post/Redirect/Get)';
+    my $after = $c->get('/', headers => { Cookie => $pair });
+    is $after->json->{you_are}, 'ada', 'session persists the logged-in user across requests';
+};
+
+subtest 'error-handling' => sub {
+    my $c = PAGI::Test::Client->new(app => load_example('error-handling'));
+    is $c->get('/ok')->status, 200, 'normal route 200';
+    my $teapot = $c->get('/teapot');
+    is $teapot->status, 418, 'die-a-respond-able sends the chosen status';
+    is $teapot->json->{error}, "I'm a teapot", 'and its body';
+    is $c->get('/boom')->status, 500, 'an uncaught die is a 500';
+    is $c->get('/nowhere')->status, 404, 'not_found handles the miss';
+};
+
+subtest 'custom-middleware' => sub {
+    my $c = PAGI::Test::Client->new(app => load_example('custom-middleware'));
+    my $public = $c->get('/public');
+    is $public->status, 200, 'public route open';
+    ok defined $public->header('x-response-time-ms'),
+        'app-wide RequestTimer injected the timing header';
+    is $c->get('/private')->status, 401, 'ApiKey rejects without the key';
+    is $c->get('/private', headers => { 'X-Api-Key' => 's3cr3t' })->json->{secret},
+        'the answer is 42', 'ApiKey admits the right key';
+};
+
 subtest 'run-shape examples still load' => sub {
     my $qs = load_example('quickstart');
     is ref($qs), 'CODE', 'quickstart app.pl loads';
