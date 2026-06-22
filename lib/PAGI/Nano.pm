@@ -30,12 +30,13 @@ our @EXPORT = qw(
 sub name       { my ($n) = @_; bless { name => $n }, 'PAGI::Nano::Marker::Name' }
 sub middleware { bless { list => [@_] }, 'PAGI::Nano::Marker::Middleware' }
 
-# Module-level registry mapping an assembled app coderef to its flat name->path
-# table, so a parent's mount can collect a mounted Nano app's named routes (the
-# app is an opaque coderef; this is the bridge across that boundary). Apps are
-# created at startup and live for the process, so a stringified-coderef key is
-# stable in practice.
-our %APP_ROUTES;
+# A unique, immutable token used to ask an assembled Nano app for its flat
+# name->path table. A parent's mount needs a mounted Nano app's named routes,
+# but the app is an opaque coderef; calling it with this token alone (instead of
+# a real ($scope,$receive,$send) triple) returns the table. This is a constant
+# probe key, not shared mutable state — no per-app registry accumulates, so
+# building apps leaves nothing behind.
+my $ROUTES_PROBE = \do { my $unused };
 
 # The dynamically-scoped current collector. app { } localizes this to a fresh
 # collector for the duration of the block; the verbs register into it. No package
@@ -87,22 +88,42 @@ sub _assemble {
     # app sees the parent's fuller, mount-prefixed registry.
     my $inner = $app;
     my $wrapped = sub {
+        # Introspection: called with the probe token alone, yield the flat name
+        # registry (this is how a parent mount collects our names). A real
+        # request is always a ($scope, $receive, $send) triple.
+        return $flat if @_ == 1 && ref $_[0] && $_[0] == $ROUTES_PROBE;
         my ($scope, $receive, $send) = @_;
         $scope->{'pagi.nano.routes'} //= $flat if ref $scope eq 'HASH';
         return $inner->($scope, $receive, $send);
     };
-    $APP_ROUTES{"$wrapped"} = { flat => $flat };
     return $wrapped;
+}
+
+# Ask an app for its flat Nano name->path table. A Nano app with named routes
+# answers the probe token with its table; anything else (a plain coderef, a PSGI
+# bridge, a Nano app with no names) either returns a non-hash or fails fast on
+# the unexpected scope, and is reported as nameless.
+sub _nano_flat_routes {
+    my ($app) = @_;
+    return undef unless ref $app eq 'CODE';
+    my $flat = eval { $app->($ROUTES_PROBE) };
+    if (Scalar::Util::blessed($flat) && $flat->isa('Future')) {
+        # A non-Nano app took the probe for a scope and failed; settle the
+        # Future so it isn't reported destroyed-unhandled.
+        $flat->cancel unless $flat->is_ready;
+        $flat->failure if $flat->is_ready && $flat->is_failed;
+        return undef;
+    }
+    return ref $flat eq 'HASH' ? $flat : undef;
 }
 
 sub _build_flat_routes {
     my ($collector) = @_;
     my %flat = %{ $collector->{named} };
     for my $m (@{ $collector->{nano_mounts} }) {
-        my $child = $APP_ROUTES{ "$m->{app}" } or next;   # non-Nano mount: no names
-        for my $nm (keys %{ $child->{flat} }) {
+        for my $nm (keys %{ $m->{flat} }) {
             Carp::croak("Duplicate route name '$nm'") if exists $flat{$nm};
-            $flat{$nm} = $m->{prefix} . $child->{flat}{$nm};
+            $flat{$nm} = $m->{prefix} . $m->{flat}{$nm};
         }
     }
     return \%flat;
@@ -188,10 +209,12 @@ sub group {
 
 sub mount {
     my ($prefix, $app) = @_;
-    # Record Nano mounts so their named routes can be folded into this app's flat
-    # registry (prefixed). Non-Nano mounts (PSGI bridges, file servers) have none.
-    push @{ $COLLECTOR->{nano_mounts} }, { prefix => $prefix, app => $app }
-        if exists $APP_ROUTES{"$app"};
+    # Fold a mounted Nano app's named routes into this app's flat registry
+    # (prefixed) so links resolve across the mount. We ask the app for its names
+    # via the probe; non-Nano mounts (PSGI bridges, file servers) report none.
+    if (my $flat = _nano_flat_routes($app)) {
+        push @{ $COLLECTOR->{nano_mounts} }, { prefix => $prefix, flat => $flat };
+    }
     $COLLECTOR->{router}->mount($prefix, $app);
 }
 

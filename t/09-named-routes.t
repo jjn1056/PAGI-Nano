@@ -125,6 +125,21 @@ subtest 'uri_for works from WebSocket and SSE handlers too' => sub {
     });
 };
 
+subtest 'no module-level route registry leaks between apps' => sub {
+    # Cross-mount name resolution must not rely on a package global: building
+    # and mounting named apps leaves no growing module-level registry behind.
+    my $api = app {
+        get '/x/:id' => name('leak_probe_x') => sub { my ($c) = @_; {} };
+    };
+    app {
+        get '/' => name('leak_probe_home') => sub { my ($c) = @_; {} };
+        mount '/api' => $api;
+    };
+    no warnings 'once';
+    is scalar keys %PAGI::Nano::APP_ROUTES, 0,
+        'no PAGI::Nano::APP_ROUTES package global accumulates app entries';
+};
+
 subtest 'duplicate route names are a loud error' => sub {
     my $err = dies {
         app {
