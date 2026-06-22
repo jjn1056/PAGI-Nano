@@ -368,6 +368,45 @@ subtest 'custom-middleware' => sub {
         'the answer is 42', 'ApiKey admits the right key';
 };
 
+subtest 'game-of-life (the showcase)' => sub {
+    my $app = load_example('game-of-life');
+
+    # The Conway engine is pure and deterministic: a blinker (three in a row)
+    # oscillates with period two, returning to its start after two generations.
+    my $w = GoL::World->new(10, 10);
+    $w->toggle(4, 5); $w->toggle(5, 5); $w->toggle(6, 5);
+    my $gen0 = $w->frame->{rows};
+    $w->step;
+    my $gen1 = $w->frame->{rows};
+    $w->step;
+    is $w->frame->{rows}, $gen0, 'a blinker returns to its start after 2 generations';
+    isnt $gen1, $gen0, 'and differs at the half-period';
+
+    # The HTTP/SSE surface (the world lives in lifespan state, so start it).
+    my $c = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $c->start;
+
+    like $c->get('/')->content_type, qr{text/html}, 'the / client page is HTML';
+
+    my $grid = $c->get('/grid')->json;
+    is $grid->{w}, 48, 'grid width';
+    is scalar(@{ $grid->{rows} }), 28, '28 rows in the snapshot';
+    is length($grid->{rows}[0]), 48, 'each row is 48 cells wide';
+
+    is $c->post('/cell/10/10')->status, 202, 'POST /cell/:x/:y toggles a cell -> 202';
+
+    $c->sse('/live', sub {
+        my ($sse) = @_;
+        my $ev = $sse->receive_event;
+        is $ev->{event}, 'frame', 'the live feed emits frame events';
+        my $f = decode_json($ev->{data});
+        ok exists $f->{generation}, 'a frame carries its generation';
+        is scalar(@{ $f->{rows} }), 28, 'a frame carries the whole grid';
+    });
+
+    $c->stop;
+};
+
 subtest 'run-shape examples still load' => sub {
     my $qs = load_example('quickstart');
     is ref($qs), 'CODE', 'quickstart app.pl loads';
