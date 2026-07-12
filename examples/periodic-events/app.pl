@@ -45,6 +45,13 @@ my $app = app {
         })->();
     };
 
+    # Cancel the ticker on shutdown: discarding a suspended async sub without
+    # cancelling it warns ("lost its returning future") and leaves its pending
+    # timer armed. Cancellation is the clean end for a background task.
+    shutdown async sub ($state) {
+        $state->{ticker}->cancel;
+    };
+
     get '/' => sub ($c) { { ticks => $c->state->{hub}->count } };
 
     get '/next' => async sub ($c) {

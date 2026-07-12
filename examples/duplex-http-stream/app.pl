@@ -49,11 +49,15 @@ my $app = app {
             })->();
 
             # The stream lives as long as the client stays connected, pushing a
-            # tick a second. (In-process test clients report no live connection,
-            # so this loop is skipped there; the real full-duplex behavior is
-            # demonstrated by probe.pl against pagi-server.)
+            # tick a second. A ?ticks=N cap bounds the run for demos and for
+            # in-process tests (PAGI::Test::Client models a client that stays
+            # connected and cannot disconnect mid-response, so an unbounded
+            # connection-driven stream would never complete there). Without the
+            # cap, the connection drives termination — see probe.pl against
+            # pagi-server for the real full-duplex run.
+            my $max = $c->req->query_param('ticks');
             my $n = 0;
-            while (!$c->is_disconnected) {
+            while (!$c->is_disconnected && (!defined $max || $n < $max)) {
                 await $w->write('tick ' . (++$n) . "\n");
                 await Future::IO->sleep(1);
             }
