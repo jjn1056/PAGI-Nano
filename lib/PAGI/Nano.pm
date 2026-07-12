@@ -130,7 +130,7 @@ sub _build_flat_routes {
 }
 
 # Wrap $app in app-wide middleware, mirroring PAGI::App::Router's event-layer
-# chain (coderef with a $next, or an object with ->call).
+# chain (coderef with a $next, or an object with ->wrap).
 sub _wrap_with_middleware {
     my ($app, $mws) = @_;
     my $chain = $app;
@@ -150,10 +150,8 @@ sub _wrap_with_middleware {
             };
         }
         else {
-            $chain = async sub {
-                my ($scope, $receive, $send) = @_;
-                await $mw->call($scope, $receive, $send, $next);
-            };
+            # PAGI::Middleware contract: wrap($app) returns the composed app.
+            $chain = $mw->wrap($next);
         }
     }
     return $chain;
@@ -398,11 +396,11 @@ sub _coerce {
 
 # Turn a middleware spec (name string, instance, or coderef) into something the
 # router/chain accepts: a coderef ($scope,$receive,$send,$next) or an object
-# with ->call. Names are resolved the way `enable` resolves them.
+# with ->wrap. Names are resolved the way `enable` resolves them.
 sub _normalize_middleware {
     my ($spec, %args) = @_;
     return $spec if ref($spec) eq 'CODE';
-    return $spec if Scalar::Util::blessed($spec) && $spec->can('call');
+    return $spec if Scalar::Util::blessed($spec) && $spec->can('wrap');
 
     Carp::croak('Invalid middleware: expected a name, instance, or coderef')
         if ref $spec;
