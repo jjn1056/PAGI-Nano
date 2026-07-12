@@ -224,15 +224,17 @@ subtest 'chat-showcase' => sub {
 };
 
 subtest 'duplex-http-stream' => sub {
-    # In-process, the test client reports no live connection, so the tick loop is
-    # skipped and we only see the body echoed; the real full-duplex behavior
-    # (ticks streaming while the request body is open, later chunks echoed
-    # mid-response) is proven by examples/duplex-http-stream/probe.pl against
-    # pagi-server.
+    # The in-process client stays connected for the whole request (it cannot
+    # disconnect mid-response), so we bound the run with ?ticks=1 and exercise
+    # BOTH branches: the body echo and the tick loop. The unbounded
+    # connection-driven behavior (ticks until the client goes away, later body
+    # chunks echoed mid-response) is proven by
+    # examples/duplex-http-stream/probe.pl against pagi-server.
     my $c = PAGI::Test::Client->new(app => load_example('duplex-http-stream'));
-    my $res = $c->post('/duplex', body => 'ping');
+    my $res = $c->post('/duplex?ticks=1', body => 'ping');
     is $res->status, 200, 'streamed 200';
     like $res->content, qr/echo: ping/, 'request body echoed';
+    like $res->content, qr/tick 1/,     'tick loop ran (bounded by ?ticks)';
 };
 
 subtest 'custom-send-events' => sub {
