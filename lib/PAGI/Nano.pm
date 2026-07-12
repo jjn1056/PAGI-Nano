@@ -169,7 +169,7 @@ sub any {
     my ($path, @rest) = @_;
     my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_http($handler, $path);
-    $COLLECTOR->{router}->any($path, ($mw ? ($mw) : ()), $wrapped);
+    $COLLECTOR->{router}->any($path, ($mw ? (_to_router_middleware($mw)) : ()), $wrapped);
     _register_name($name, $path) if defined $name;
 }
 
@@ -177,7 +177,7 @@ sub _add_route {
     my ($method, $path, @rest) = @_;
     my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_http($handler, $path);
-    $COLLECTOR->{router}->route($method, $path, ($mw ? ($mw) : ()), $wrapped);
+    $COLLECTOR->{router}->route($method, $path, ($mw ? (_to_router_middleware($mw)) : ()), $wrapped);
     _register_name($name, $path) if defined $name;
 }
 
@@ -188,7 +188,7 @@ sub raw {
     my ($path, @rest) = @_;
     my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_raw($handler, $path);
-    $COLLECTOR->{router}->any($path, ($mw ? ($mw) : ()), $wrapped);
+    $COLLECTOR->{router}->any($path, ($mw ? (_to_router_middleware($mw)) : ()), $wrapped);
     _register_name($name, $path) if defined $name;
 }
 
@@ -201,7 +201,7 @@ sub group {
     # same router during the block, so they are prefixed and branch-wrapped. We
     # track the prefix in parallel so named routes record their full path.
     push @{ $COLLECTOR->{prefix_stack} }, $prefix;
-    $COLLECTOR->{router}->group($prefix, ($mw ? ($mw) : ()), sub { $block->() });
+    $COLLECTOR->{router}->group($prefix, ($mw ? (_to_router_middleware($mw)) : ()), sub { $block->() });
     pop @{ $COLLECTOR->{prefix_stack} };
 }
 
@@ -243,7 +243,7 @@ sub websocket {
     my ($path, @rest) = @_;
     my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_socket($handler, $path);
-    $COLLECTOR->{router}->websocket($path, ($mw ? ($mw) : ()), $wrapped);
+    $COLLECTOR->{router}->websocket($path, ($mw ? (_to_router_middleware($mw)) : ()), $wrapped);
     _register_name($name, $path) if defined $name;
 }
 
@@ -251,7 +251,7 @@ sub sse {
     my ($path, @rest) = @_;
     my ($mw, $handler, $name) = _parse_route_args(@rest);
     my $wrapped = _wrap_socket($handler, $path);
-    $COLLECTOR->{router}->sse($path, ($mw ? ($mw) : ()), $wrapped);
+    $COLLECTOR->{router}->sse($path, ($mw ? (_to_router_middleware($mw)) : ()), $wrapped);
     _register_name($name, $path) if defined $name;
 }
 
@@ -410,6 +410,29 @@ sub _normalize_middleware {
     my $file = ($class =~ s{::}{/}gr) . '.pm';
     require $file;
     return $class->new(%args);
+}
+
+# Adapt middleware for PAGI::App::Router, whose contract is a factory coderef
+# ($factory->($app) returns the wrapped app) or an object with ->wrap. Nano's
+# coderef middleware shape is ($scope, $receive, $send, $next); wrap each in a
+# factory preserving those semantics (including transformed-channel forwarding).
+sub _to_router_middleware {
+    my ($mws) = @_;
+    return [ map {
+        my $mw = $_;
+        ref($mw) eq 'CODE'
+            ? sub {
+                my ($app) = @_;
+                return async sub {
+                    my ($scope, $receive, $send) = @_;
+                    await $mw->($scope, $receive, $send, async sub {
+                        my ($s, $r, $sd) = @_ ? @_ : ($scope, $receive, $send);
+                        await $app->($s, $r, $sd);
+                    });
+                };
+            }
+            : $mw
+    } @$mws ];
 }
 
 sub _normalize_middleware_list {

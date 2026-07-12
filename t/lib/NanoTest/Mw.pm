@@ -10,10 +10,13 @@ our @TRAIL;
 
 sub new { my ($class, %args) = @_; bless { %args }, $class }
 
-sub call {
-    my ($self, $scope, $receive, $send, $next) = @_;
-    push @TRAIL, $self->{tag} // 'default';
-    return $next->($scope, $receive, $send);
+sub wrap {
+    my ($self, $app) = @_;
+    return sub {
+        my ($scope, $receive, $send) = @_;
+        push @TRAIL, $self->{tag} // 'default';
+        return $app->($scope, $receive, $send);
+    };
 }
 
 1;
