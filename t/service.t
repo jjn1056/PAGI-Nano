@@ -140,4 +140,80 @@ subtest 'factory: always-new maker, fresh on every call, receives the context' =
     $client->stop;
 };
 
+subtest 'error: duplicate service declaration' => sub {
+    my $err = dies {
+        app {
+            service dup => sub { 1 };
+            service dup => sub { 2 };
+        };
+    };
+    like $err, qr/dup/, 'croaks naming the duplicate service';
+};
+
+subtest 'error: service() called outside an app { } block' => sub {
+    my $err = dies { service('orphan', sub { 1 }) };
+    like $err, qr/orphan/, 'croaks naming the service';
+    like $err, qr/app \{/, 'croaks mentioning the app { } block';
+};
+
+subtest 'error: $c->service(unknown) at request time' => sub {
+    my $app = app {
+        service known => sub { 1 };
+        get '/x' => sub { my ($c) = @_; $c->service('nope') };
+    };
+    my $client = PAGI::Test::Client->new(
+        app => $app, lifespan => 1, raise_app_exceptions => 1,
+    );
+    $client->start;
+
+    my $err = dies { $client->get('/x') };
+    like $err, qr/nope/, 'croaks naming the unknown service';
+
+    $client->stop;
+};
+
+subtest 'error: factory() called with a non-coderef' => sub {
+    my $err = dies { factory('not a coderef') };
+    like $err, qr/coderef/i, 'croaks explaining a coderef is required';
+};
+
+subtest 'error: a forward reference to a not-yet-built service fails lifespan startup' => sub {
+    # $app->service('late') from within 'early's builder, before 'late' has run:
+    # services build eagerly in declaration order, so this must fail the whole
+    # worker at boot (via the lifespan protocol), not at first request.
+    #
+    # PAGI::Test::Client->start doesn't surface lifespan.startup.failed (it just
+    # busy-waits for .complete and gives up after its own deadline), so drive the
+    # lifespan protocol by hand here to observe the failure event directly.
+    my $app = app {
+        service early => sub { my ($app) = @_; return $app->service('late') };
+        service late  => sub { return 'ok' };
+    };
+
+    my @events;
+    my $scope = {
+        type => 'lifespan',
+        pagi => { version => '0.2', spec_version => '0.2' },
+        state => {},
+    };
+    my $receive_calls = 0;
+    my $receive = async sub {
+        $receive_calls++;
+        return { type => 'lifespan.startup' } if $receive_calls == 1;
+        die 'test receive() called more than once; unexpected for a failed startup';
+    };
+    my $send = async sub { my ($event) = @_; push @events, $event };
+
+    $app->($scope, $receive, $send)->get;
+
+    my ($failed) = grep { ($_->{type} // '') eq 'lifespan.startup.failed' } @events;
+    ok $failed, 'lifespan.startup.failed was sent';
+    like $failed->{message}, qr/late/, 'the failure names the forward-referenced service';
+    like $failed->{message}, qr/declaration order/i,
+        'the failure explains services build in declaration order';
+
+    ok !(grep { ($_->{type} // '') eq 'lifespan.startup.complete' } @events),
+        'lifespan.startup.complete was never sent';
+};
+
 done_testing;

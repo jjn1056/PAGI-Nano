@@ -267,6 +267,10 @@ sub shutdown { push @{$COLLECTOR->{shutdown}}, $_[0] }
 
 sub service {
     my ($name, $builder) = @_;
+    Carp::croak("service '$name' declared outside an app { } block")
+        unless $COLLECTOR;
+    Carp::croak("Duplicate service '$name'")
+        if grep { $_->[0] eq $name } @{$COLLECTOR->{services}};
     push @{$COLLECTOR->{services}}, [$name, $builder];
 }
 
