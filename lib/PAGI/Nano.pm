@@ -609,7 +609,7 @@ are out of scope (use Valiant downstream and your own model).
 All of the following are exported by default:
 C<app>, C<get>, C<post>, C<put>, C<patch>, C<del>, C<any>, C<raw>, C<group>,
 C<mount>, C<enable>, C<startup>, C<shutdown>, C<static>, C<not_found>,
-C<websocket>, C<sse>, C<name>, C<middleware>.
+C<websocket>, C<sse>, C<name>, C<middleware>, C<service>, C<factory>.
 
 =head1 THE COLLECTOR
 
@@ -779,6 +779,82 @@ L<PAGI::Nano::Context>).
 Sugar over L<PAGI::Lifespan>. C<$state> is the shared, app-lifetime state
 hashref; handlers read it via C<< $c->state >>.
 
+=head1 SERVICES
+
+=head2 service / factory
+
+    service schema => sub {
+        my ($app) = @_;
+        return $schema;                              # app-scoped singleton
+    };
+
+    service params => sub {
+        my ($app) = @_;
+        return sub {                                  # per-request maker
+            my ($ctx) = @_;
+            return Params->new($ctx->params);
+        };
+    };
+
+    service stamp => sub {
+        my ($app) = @_;
+        return factory sub {                          # per-call maker
+            my ($ctx) = @_;
+            return Stamp->new;
+        };
+    };
+
+A tiny three-scope registry. C<service NAME =E<gt> BUILDER> declares a
+service; C<< $c->service(NAME) >> resolves it at request time, on every
+context flavor (HTTP, WebSocket, and SSE alike). The scope is chosen by what
+the builder I<returns>, not by any option:
+
+=over 4
+
+=item * a plain value (including any blessed object, other than a C<factory>
+marker below) — an B<app-scoped singleton>. Every C<< $c->service >> access,
+on every request, returns this same value.
+
+=item * an unblessed coderef — a B<per-request maker>. The first
+C<< $c->service >> access in a request calls it with the context and memoizes
+the result for the rest of that request (for a WebSocket or SSE context,
+"request" means that connection); later accesses in the same
+request/connection return the memoized value.
+
+=item * C<< factory sub { ... } >> — a B<per-call maker>. Every access calls
+it with the context; nothing is memoized, so every C<< $c->service >> call
+gets a fresh object.
+
+=back
+
+Builders run B<eagerly, once per worker, in declaration order>, at lifespan
+startup — registered before any user C<startup> hook (see L</startup /
+shutdown>). A builder that dies fails lifespan startup, so a misconfigured
+service stops the worker at boot rather than surfacing on a customer's first
+request.
+
+Builders B<compose>: each builder receives the registry itself (C<$app> in
+the examples above), and C<< $app->service(NAME) >> returns an
+already-built service, letting a later service incorporate an earlier one.
+Because building is eager and ordered, asking for a service declared later in
+the same C<app { }> block — or not declared at all — croaks, naming the
+service: services can only depend on what has already been built.
+
+Since a plain returned coderef always means "per-request maker", a service
+that itself needs to hand out a fixed callback (not build one per request)
+uses the per-request-maker shape as an escape hatch, returning the same
+closure every time:
+
+    service on_tick => sub {
+        my ($app) = @_;
+        my $callback = sub { ... };
+        return sub { my ($ctx) = @_; return $callback };
+    };
+
+There is no teardown pairing in v1: a service that owns a resource needing
+cleanup should register its own C<shutdown> hook. There are also no generated
+accessors — always C<< $c->service('schema') >>, never C<< $c->schema >>.
+
 =head1 STATIC FILES AND CUSTOM 404
 
 =head2 static
@@ -855,7 +931,7 @@ and run C<pagi-server -Ilib lib/MyApp.pm>. Nano never touches C<@INC>.
 =head1 SEE ALSO
 
 L<PAGI::Tools>, L<PAGI::StructuredParameters>, L<PAGI::Nano::Context::HTTP>,
-L<PAGI::App::Router>, L<PAGI::Lifespan>.
+L<PAGI::App::Router>, L<PAGI::Lifespan>, L<PAGI::Nano::ServiceRegistry>.
 
 =head1 AUTHOR
 

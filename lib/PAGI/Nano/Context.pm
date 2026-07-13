@@ -80,8 +80,8 @@ PAGI::Nano::Context - Shared behavior for the contexts PAGI::Nano vends
 
 A mixin inherited by L<PAGI::Nano::Context::HTTP>,
 L<PAGI::Nano::Context::WebSocket>, and L<PAGI::Nano::Context::SSE> alongside the
-stock PAGI context class for each scope type. It provides L</uri_for>, which is
-available to handlers of every protocol.
+stock PAGI context class for each scope type. It provides L</uri_for> and
+L</service>, both available to handlers of every protocol.
 
 =head1 METHODS
 
@@ -98,6 +98,16 @@ Resolution is against the flat name registry PAGI::Nano injects on the scope, so
 names defined anywhere in the app — including across a C<mount>, in either
 direction — are reachable, with mount prefixes applied. Dies if the name is
 unknown.
+
+=head2 service
+
+    my $value = $c->service($name);
+
+Resolves a service declared with L<PAGI::Nano/service>. Whether this returns
+the same app-scoped value every time, a per-request object built and memoized
+on first access, or a fresh object on every call, is decided by what the
+service's builder returned — see L<PAGI::Nano/SERVICES> for the full scoping
+rule. Dies if C<$name> was never declared.
 
 =head1 AUTHOR
 
