@@ -140,6 +140,41 @@ subtest 'factory: always-new maker, fresh on every call, receives the context' =
     $client->stop;
 };
 
+subtest '$c->service resolves from WebSocket and SSE handlers too, not just HTTP' => sub {
+    my $app = app {
+        service greeting => sub { return { hello => 'world' } };
+
+        websocket '/ws' => async sub {
+            my ($c) = @_;
+            my $ws = $c->websocket;
+            await $ws->accept;
+            await $ws->send_text($c->service('greeting')->{hello});
+        };
+
+        sse '/sse' => async sub {
+            my ($c) = @_;
+            my $s = $c->sse;
+            await $s->send($c->service('greeting')->{hello});
+            await $s->close;
+        };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    $client->websocket('/ws', sub {
+        my ($ws) = @_;
+        is $ws->receive_text, 'world', '$c->service resolves from a WebSocket handler';
+    });
+
+    $client->sse('/sse', sub {
+        my ($sse) = @_;
+        is $sse->receive_event->{data}, 'world', '$c->service resolves from an SSE handler';
+    });
+
+    $client->stop;
+};
+
 subtest 'error: duplicate service declaration' => sub {
     my $err = dies {
         app {
