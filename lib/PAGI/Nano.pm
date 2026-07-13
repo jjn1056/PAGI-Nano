@@ -40,6 +40,13 @@ sub middleware { bless { list => [@_] }, 'PAGI::Nano::Marker::Middleware' }
 # building apps leaves nothing behind.
 my $ROUTES_PROBE = \do { my $unused };
 
+# A sibling probe token: ask an assembled Nano app whether it declared any
+# services (true/false), the same way $ROUTES_PROBE asks for the named-route
+# table. mount() uses this to refuse mounting an app that declared services --
+# the outermost app owns lifecycle (see mount's shared-state limitation in the
+# POD), so a mounted app's own services would never get built.
+my $SERVICES_PROBE = \do { my $unused };
+
 # The dynamically-scoped current collector. app { } localizes this to a fresh
 # collector for the duration of the block; the verbs register into it. No package
 # globals leak between app { } invocations, so apps are values: composable,
@@ -92,17 +99,24 @@ sub _assemble {
     # of any mounted Nano app (prefixed, recursively via their stored tables).
     my $flat = _build_flat_routes($collector);
 
-    return $app unless %$flat;   # nothing named anywhere -> no link machinery
+    # Nothing to expose or introspect -> no wrapper needed. A services-only app
+    # (no named routes) still needs one, purely so mount() can probe it and
+    # refuse to mount it (see $SERVICES_PROBE).
+    return $app unless %$flat || $registry;
 
     # Outermost wrapper: inject the registry on each request so $c->uri_for can
     # resolve any name from anywhere. The outermost app wins (//=), so a mounted
     # app sees the parent's fuller, mount-prefixed registry.
     my $inner = $app;
     my $wrapped = sub {
-        # Introspection: called with the probe token alone, yield the flat name
-        # registry (this is how a parent mount collects our names). A real
-        # request is always a ($scope, $receive, $send) triple.
-        return $flat if @_ == 1 && ref $_[0] && $_[0] == $ROUTES_PROBE;
+        # Introspection: called with a probe token alone, answer it directly (this
+        # is how mount() inspects an opaque mounted app's coderef -- for its named
+        # routes, and for whether it declared services at all). A real request is
+        # always a ($scope, $receive, $send) triple.
+        if (@_ == 1 && ref $_[0]) {
+            return $flat            if $_[0] == $ROUTES_PROBE;
+            return $registry ? 1 : 0 if $_[0] == $SERVICES_PROBE;
+        }
         my ($scope, $receive, $send) = @_;
         $scope->{'pagi.nano.routes'} //= $flat if ref $scope eq 'HASH';
         return $inner->($scope, $receive, $send);
@@ -126,6 +140,22 @@ sub _nano_flat_routes {
         return undef;
     }
     return ref $flat eq 'HASH' ? $flat : undef;
+}
+
+# Ask an app whether it declared any services, the same way _nano_flat_routes
+# asks for named routes: a non-Nano app (or a Nano app with neither named
+# routes nor services, which has no probe-answering wrapper at all) simply
+# fails the probe and answers false.
+sub _nano_has_services {
+    my ($app) = @_;
+    return 0 unless ref $app eq 'CODE';
+    my $answer = eval { $app->($SERVICES_PROBE) };
+    if (Scalar::Util::blessed($answer) && $answer->isa('Future')) {
+        $answer->cancel unless $answer->is_ready;
+        $answer->failure if $answer->is_ready && $answer->is_failed;
+        return 0;
+    }
+    return $answer ? 1 : 0;
 }
 
 sub _build_flat_routes {
@@ -240,6 +270,16 @@ sub group {
 
 sub mount {
     my ($prefix, $app) = @_;
+    # The outermost app owns lifecycle (the router never forwards lifespan
+    # events into a mount, so a mounted app's own startup/shutdown never run --
+    # see mount's POD); a mounted app that declared services would silently
+    # never build them, so refuse it loudly instead. A service-less mounted
+    # Nano app is fine: it has no registry of its own, so requests routed into
+    # it simply see whatever the outermost app injected onto the scope.
+    Carp::croak("mount '$prefix': a mounted Nano app cannot declare services -- "
+        . 'the outermost app owns lifecycle (see "mount" in the PAGI::Nano POD)')
+        if _nano_has_services($app);
+
     # Fold a mounted Nano app's named routes into this app's flat registry
     # (prefixed) so links resolve across the mount. We ask the app for its names
     # via the probe; non-Nano mounts (PSGI bridges, file servers) report none.
@@ -689,7 +729,9 @@ L<PAGI::Endpoint::Router>, or any coderef app.
 The router does not forward lifespan events to mounted apps, so a mounted Nano
 app's own C<startup>/C<shutdown> do not run; the outermost app owns lifecycle and
 mounted children share its C<state>. Write mountable apps to initialize their
-slice of state defensively.
+slice of state defensively. For the same reason, C<mount> croaks if the app
+being mounted declared any L</SERVICES> — a service-less mounted app is fine,
+and transparently shares the outermost app's services.
 
 =head1 RESPONSES AND COERCION
 
@@ -854,6 +896,17 @@ closure every time:
 There is no teardown pairing in v1: a service that owns a resource needing
 cleanup should register its own C<shutdown> hook. There are also no generated
 accessors — always C<< $c->service('schema') >>, never C<< $c->schema >>.
+
+B<Services and C<mount>: the outermost app owns lifecycle.> Just as a mounted
+Nano app's own C<startup>/C<shutdown> never run (see L</mount> — the router
+never forwards lifespan events into a mount), a mounted Nano app cannot
+declare services at all: C<mount> croaks immediately if the app being mounted
+declared any, since their builders would never get a chance to run. A mounted
+Nano app that declares no services of its own is unaffected — it has no
+registry, so C<< $c->service >> inside it simply resolves against whatever the
+outermost app injected onto the scope, the same instances the rest of the app
+sees. If lifespan forwarding to mounted apps is ever added, per-mount services
+can be revisited.
 
 =head1 STATIC FILES AND CUSTOM 404
 

@@ -175,6 +175,67 @@ subtest '$c->service resolves from WebSocket and SSE handlers too, not just HTTP
     $client->stop;
 };
 
+# Mounting: "the outermost app owns lifecycle" (documented for startup/shutdown
+# already) applies to services too. A mounted child with no services of its
+# own shares the parent's registry (nothing overwrites what the parent injected
+# onto the scope); a mounted child that DOES declare services is refused at
+# mount time, since its own lifespan startup would never run.
+
+subtest 'a mounted child with no services of its own shares the parent registry' => sub {
+    my @maker_calls;
+    my $child = app {
+        get '/child-app-scoped' => sub { my ($c) = @_; $c->service('shared_value') };
+        get '/child-per-request' => sub {
+            my ($c) = @_;
+            my $a = $c->service('shared_maker');
+            my $b = $c->service('shared_maker');
+            { same => (refaddr($a) == refaddr($b) ? 1 : 0) };
+        };
+    };
+
+    my $app = app {
+        service shared_value => sub { return { from => 'parent' } };
+        service shared_maker => sub {
+            return sub {
+                my ($ctx) = @_;
+                push @maker_calls, $ctx;
+                return {};
+            };
+        };
+        mount '/child' => $child;
+        get '/parent-app-scoped' => sub { my ($c) = @_; $c->service('shared_value') };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    is $client->get('/child/child-app-scoped')->json, { from => 'parent' },
+        'a request routed into the mounted child sees the parent app-scoped service';
+
+    my $r = $client->get('/child/child-per-request')->json;
+    is $r->{same}, 1,
+        'the parent per-request maker is memoized within one request, even inside the mounted child';
+
+    is $client->get('/parent-app-scoped')->json, { from => 'parent' },
+        'parent-owned routes still see the same service too';
+
+    $client->stop;
+};
+
+subtest 'error: mounting a Nano app that declares its own services croaks at mount time' => sub {
+    my $child = app {
+        service oops => sub { return 1 };
+    };
+
+    my $err = dies {
+        app {
+            mount '/child' => $child;
+        };
+    };
+    like $err, qr/service/i, 'croaks mentioning services';
+    like $err, qr/lifecycle/i, 'croaks explaining the outermost app owns lifecycle';
+};
+
 subtest 'error: duplicate service declaration' => sub {
     my $err = dies {
         app {

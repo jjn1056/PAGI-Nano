@@ -39,10 +39,13 @@ sub service {
 # scope-discrimination rule to the raw builder result. A factory-marked
 # coderef (see PAGI::Nano::factory) is invoked fresh on every call. An
 # unblessed coderef is a per-request maker, invoked with $ctx and memoized on
-# $ctx's scope (keyed by this registry's refaddr, so distinct registries --
-# e.g. a parent app and a mounted Nano child -- never share or clobber each
-# other's cache). Anything else (a plain value, or any other blessed object)
-# is an app-scoped singleton, returned as-is.
+# $ctx's scope. Anything else (a plain value, or any other blessed object) is
+# an app-scoped singleton, returned as-is.
+#
+# The memoization cache is a single flat hash on the scope, not sub-keyed by
+# registry: mount() refuses to mount a Nano app that declares its own services
+# (the outermost app owns lifecycle -- see PAGI::Nano/mount), so only one
+# registry is ever in play for a given request.
 sub _resolve {
     my ($self, $name, $ctx) = @_;
     my $raw = $self->service($name);
@@ -53,7 +56,7 @@ sub _resolve {
 
     if (!Scalar::Util::blessed($raw) && ref($raw) eq 'CODE') {
         my $scope = $ctx->{scope};
-        my $cache = $scope->{'pagi.nano.service_cache'}{ Scalar::Util::refaddr($self) } //= {};
+        my $cache = $scope->{'pagi.nano.service_cache'} //= {};
         return $cache->{$name} //= $raw->($ctx);
     }
 
