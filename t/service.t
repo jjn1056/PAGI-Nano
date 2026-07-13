@@ -172,6 +172,16 @@ subtest 'error: $c->service(unknown) at request time' => sub {
     $client->stop;
 };
 
+subtest 'error: $c->service used in an app that declared no services at all' => sub {
+    my $app = app {
+        get '/x' => sub { my ($c) = @_; $c->service('anything') };
+    };
+    my $client = PAGI::Test::Client->new(app => $app, raise_app_exceptions => 1);
+
+    my $err = dies { $client->get('/x') };
+    like $err, qr/service/i, 'croaks (no registry was ever injected onto the scope)';
+};
+
 subtest 'error: factory() called with a non-coderef' => sub {
     my $err = dies { factory('not a coderef') };
     like $err, qr/coderef/i, 'croaks explaining a coderef is required';
