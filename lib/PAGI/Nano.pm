@@ -827,23 +827,18 @@ hashref; handlers read it via C<< $c->state >>.
 
 =head2 service / factory
 
-    service schema => sub {
-        my ($app) = @_;
+    service schema => sub ($app) {
         return $schema;                              # app-scoped singleton
     };
 
-    service params => sub {
-        my ($app) = @_;
-        return sub {                                  # per-request maker
-            my ($ctx) = @_;
+    service params => sub ($app) {
+        return sub ($ctx) {                           # per-request maker
             return Params->new($ctx->params);
         };
     };
 
-    service stamp => sub {
-        my ($app) = @_;
-        return factory sub {                          # per-call maker
-            my ($ctx) = @_;
+    service stamp => sub ($app) {
+        return factory sub ($ctx) {                   # per-call maker
             return Stamp->new;
         };
     };
@@ -889,10 +884,9 @@ that itself needs to hand out a fixed callback (not build one per request)
 uses the per-request-maker shape as an escape hatch, returning the same
 closure every time:
 
-    service on_tick => sub {
-        my ($app) = @_;
+    service on_tick => sub ($app) {
         my $callback = sub { ... };
-        return sub { my ($ctx) = @_; return $callback };
+        return sub ($ctx) { return $callback };
     };
 
 There is no teardown pairing in v1: a service that owns a resource needing
