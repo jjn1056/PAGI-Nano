@@ -3,6 +3,7 @@ package PAGI::Nano::ServiceRegistry;
 use strict;
 use warnings;
 use Carp ();
+use Scalar::Util ();
 
 # One instance per assembled Nano app that declares any services. Holds the
 # eagerly-built, per-worker results keyed by name. Vended to builders as the
@@ -32,6 +33,31 @@ sub service {
     Carp::croak("no service named '$name' (services build in declaration order at startup)")
         unless exists $self->{built}{$name};
     return $self->{built}{$name};
+}
+
+# The request-time accessor behind PAGI::Nano::Context::service: applies the
+# scope-discrimination rule to the raw builder result. A factory-marked
+# coderef (see PAGI::Nano::factory) is invoked fresh on every call. An
+# unblessed coderef is a per-request maker, invoked with $ctx and memoized on
+# $ctx's scope (keyed by this registry's refaddr, so distinct registries --
+# e.g. a parent app and a mounted Nano child -- never share or clobber each
+# other's cache). Anything else (a plain value, or any other blessed object)
+# is an app-scoped singleton, returned as-is.
+sub _resolve {
+    my ($self, $name, $ctx) = @_;
+    my $raw = $self->service($name);
+
+    if (Scalar::Util::blessed($raw) && $raw->isa('PAGI::Nano::Marker::Factory')) {
+        return $raw->($ctx);
+    }
+
+    if (!Scalar::Util::blessed($raw) && ref($raw) eq 'CODE') {
+        my $scope = $ctx->{scope};
+        my $cache = $scope->{'pagi.nano.service_cache'}{ Scalar::Util::refaddr($self) } //= {};
+        return $cache->{$name} //= $raw->($ctx);
+    }
+
+    return $raw;
 }
 
 1;

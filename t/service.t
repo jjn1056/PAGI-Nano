@@ -76,4 +76,68 @@ subtest 'declaration order + composition: a later service gets an earlier one vi
     $client->stop;
 };
 
+subtest 'per-request: unblessed coderef => per-request maker, memoized in-request, fresh per request' => sub {
+    my @maker_ctx;
+    my $app = app {
+        service widget => sub {
+            return sub {
+                my ($ctx) = @_;
+                push @maker_ctx, $ctx;
+                return { seq => scalar(@maker_ctx) };
+            };
+        };
+        get '/addr-twice' => sub {
+            my ($c) = @_;
+            my $a = $c->service('widget');
+            my $b = $c->service('widget');
+            { same_ref => (refaddr($a) == refaddr($b) ? 1 : 0), seq => $a->{seq} };
+        };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    my $r1 = $client->get('/addr-twice')->json;
+    is $r1->{same_ref}, 1, 'two calls within one request return the same memoized object';
+
+    my $r2 = $client->get('/addr-twice')->json;
+    isnt $r1->{seq}, $r2->{seq}, 'a second request gets a freshly-built object (fresh maker invocation)';
+
+    is scalar(@maker_ctx), 2, 'the maker ran once per request (not once per call)';
+    ok((Scalar::Util::blessed($maker_ctx[0]) && $maker_ctx[0]->isa('PAGI::Nano::Context::HTTP')),
+        'the maker received the request context as its argument');
+
+    $client->stop;
+};
+
+subtest 'factory: always-new maker, fresh on every call, receives the context' => sub {
+    my @maker_ctx;
+    my $app = app {
+        service stamp => sub {
+            return factory sub {
+                my ($ctx) = @_;
+                push @maker_ctx, $ctx;
+                return { seq => scalar(@maker_ctx) };
+            };
+        };
+        get '/twice' => sub {
+            my ($c) = @_;
+            my $a = $c->service('stamp');
+            my $b = $c->service('stamp');
+            { a => $a->{seq}, b => $b->{seq} };
+        };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    my $r = $client->get('/twice')->json;
+    isnt $r->{a}, $r->{b}, 'two calls in the same request return different objects';
+    is scalar(@maker_ctx), 2, 'the maker ran on every call, not memoized';
+    ok((Scalar::Util::blessed($maker_ctx[0]) && $maker_ctx[0]->isa('PAGI::Nano::Context::HTTP')),
+        'the maker received the request context as its argument');
+
+    $client->stop;
+};
+
 done_testing;

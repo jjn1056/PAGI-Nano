@@ -270,6 +270,15 @@ sub service {
     push @{$COLLECTOR->{services}}, [$name, $builder];
 }
 
+# Marks a service builder's returned coderef as a per-call maker: every
+# $c->service access invokes it fresh, nothing is memoized. Without this a
+# returned coderef is a per-request maker (memoized for the request instead).
+sub factory {
+    my ($cb) = @_;
+    Carp::croak('factory: expected a coderef') unless ref $cb eq 'CODE';
+    return bless $cb, 'PAGI::Nano::Marker::Factory';
+}
+
 sub not_found {
     my ($handler) = @_;
     $COLLECTOR->{router}{not_found} = _wrap_http($handler, '');

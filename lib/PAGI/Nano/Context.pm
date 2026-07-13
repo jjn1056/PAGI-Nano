@@ -58,7 +58,7 @@ sub service {
         . "(is this a PAGI::Nano app, and was '$name' declared?)")
         unless $registry;
 
-    return $registry->service($name);
+    return $registry->_resolve($name, $self);
 }
 
 sub _uri_escape {
