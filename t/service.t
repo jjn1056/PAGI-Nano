@@ -76,6 +76,30 @@ subtest 'declaration order + composition: a later service gets an earlier one vi
     $client->stop;
 };
 
+subtest 'app-scoped: a builder returning undef is a legitimate built value, not "unbuilt"' => sub {
+    # ServiceRegistry::service checks `exists $self->{built}{$name}`, not
+    # definedness or truthiness -- a builder is free to return undef, and that
+    # must be stored and handed back as-is, never mistaken for "never built".
+    my $app = app {
+        service maybe_absent => sub { return undef };
+        get '/x' => sub {
+            my ($c) = @_;
+            { is_undef => (defined($c->service('maybe_absent')) ? 0 : 1) };
+        };
+    };
+
+    my $client = PAGI::Test::Client->new(
+        app => $app, lifespan => 1, raise_app_exceptions => 1,
+    );
+    $client->start;
+
+    my $res = $client->get('/x');
+    is $res->status, 200, 'no croak: an app-scoped undef value is legitimate, not "not yet built"';
+    is $res->json->{is_undef}, 1, 'the value really is undef, not some other falsy placeholder';
+
+    $client->stop;
+};
+
 subtest 'per-request: unblessed coderef => per-request maker, memoized in-request, fresh per request' => sub {
     my @maker_ctx;
     my $app = app {
@@ -106,6 +130,45 @@ subtest 'per-request: unblessed coderef => per-request maker, memoized in-reques
     is scalar(@maker_ctx), 2, 'the maker ran once per request (not once per call)';
     ok((Scalar::Util::blessed($maker_ctx[0]) && $maker_ctx[0]->isa('PAGI::Nano::Context::HTTP')),
         'the maker received the request context as its argument');
+
+    $client->stop;
+};
+
+subtest 'per-request: a maker whose return value is itself a coderef is returned as-is, memoized' => sub {
+    # Scope discrimination applies only to the BUILDER's return value (deciding
+    # "this is a per-request maker"); the maker's own result is never
+    # re-examined for a second level of discrimination, even if it happens to
+    # be a coderef too.
+    my $inner_cb = sub { 'inner result' };
+    my @maker_calls;
+    my $app = app {
+        service cb_holder => sub {
+            return sub {
+                my ($ctx) = @_;
+                push @maker_calls, $ctx;
+                return $inner_cb;
+            };
+        };
+        get '/twice' => sub {
+            my ($c) = @_;
+            my $a = $c->service('cb_holder');
+            my $b = $c->service('cb_holder');
+            {
+                a_is_cb  => (ref($a) eq 'CODE' ? 1 : 0),
+                same_cb  => (refaddr($a) == refaddr($b) ? 1 : 0),
+                a_result => $a->(),
+            };
+        };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    my $r = $client->get('/twice')->json;
+    is $r->{a_is_cb}, 1, 'the memoized value is the coderef itself, not invoked a second level';
+    is $r->{same_cb}, 1, 'both calls return the same coderef (memoized, not rebuilt)';
+    is $r->{a_result}, 'inner result', 'the returned coderef still behaves like the original';
+    is scalar(@maker_calls), 1, 'the maker itself ran exactly once for two calls in one request';
 
     $client->stop;
 };
