@@ -124,38 +124,40 @@ sub _assemble {
     return $wrapped;
 }
 
-# Ask an app for its flat Nano name->path table. A Nano app with named routes
-# answers the probe token with its table; anything else (a plain coderef, a PSGI
-# bridge, a Nano app with no names) either returns a non-hash or fails fast on
-# the unexpected scope, and is reported as nameless.
-sub _nano_flat_routes {
-    my ($app) = @_;
+# Ask an opaque app coderef a probe question by calling it with a single
+# sentinel token instead of a real ($scope, $receive, $send) triple, and
+# return whatever it answers. A non-Nano app (a plain coderef, a PSGI bridge)
+# or a Nano app with no probe-answering wrapper either isn't a coderef, dies
+# outright (caught below), or -- since it IS a coderef, called with one
+# unexpected scalar arg -- ends up treating the token as a malformed scope and
+# returns an unready or failed Future; settle that Future here so it isn't
+# reported destroyed-unhandled, and answer undef either way. This is the one
+# place that Future-lifecycle handling lives; callers each do their own
+# one-line coercion of a real answer.
+sub _probe {
+    my ($app, $token) = @_;
     return undef unless ref $app eq 'CODE';
-    my $flat = eval { $app->($ROUTES_PROBE) };
-    if (Scalar::Util::blessed($flat) && $flat->isa('Future')) {
-        # A non-Nano app took the probe for a scope and failed; settle the
-        # Future so it isn't reported destroyed-unhandled.
-        $flat->cancel unless $flat->is_ready;
-        $flat->failure if $flat->is_ready && $flat->is_failed;
-        return undef;
-    }
-    return ref $flat eq 'HASH' ? $flat : undef;
-}
-
-# Ask an app whether it declared any services, the same way _nano_flat_routes
-# asks for named routes: a non-Nano app (or a Nano app with neither named
-# routes nor services, which has no probe-answering wrapper at all) simply
-# fails the probe and answers false.
-sub _nano_has_services {
-    my ($app) = @_;
-    return 0 unless ref $app eq 'CODE';
-    my $answer = eval { $app->($SERVICES_PROBE) };
+    my $answer = eval { $app->($token) };
     if (Scalar::Util::blessed($answer) && $answer->isa('Future')) {
         $answer->cancel unless $answer->is_ready;
         $answer->failure if $answer->is_ready && $answer->is_failed;
-        return 0;
+        return undef;
     }
-    return $answer ? 1 : 0;
+    return $answer;
+}
+
+# Ask an app for its flat Nano name->path table. A Nano app with named routes
+# answers the probe token with its table; anything else is reported as nameless.
+sub _nano_flat_routes {
+    my ($app) = @_;
+    my $flat = _probe($app, $ROUTES_PROBE);
+    return ref $flat eq 'HASH' ? $flat : undef;
+}
+
+# Ask an app whether it declared any services.
+sub _nano_has_services {
+    my ($app) = @_;
+    return _probe($app, $SERVICES_PROBE) ? 1 : 0;
 }
 
 sub _build_flat_routes {
