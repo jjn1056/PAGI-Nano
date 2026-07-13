@@ -45,6 +45,22 @@ sub uri_for {
     return $path;
 }
 
+# Resolve a declared service by name. Delegates to the registry PAGI::Nano
+# injects on the scope (the same mechanism uri_for uses for named routes),
+# which applies the scope-discrimination rule: an app-scoped value is returned
+# as-is, a per-request maker is invoked and memoized for this request/
+# connection, and a factory-marked maker is invoked fresh on every call.
+sub service {
+    my ($self, $name) = @_;
+
+    my $registry = $self->{scope}{'pagi.nano.services'};
+    Carp::croak("service: no service registry on the scope "
+        . "(is this a PAGI::Nano app, and was '$name' declared?)")
+        unless $registry;
+
+    return $registry->service($name);
+}
+
 sub _uri_escape {
     my ($s) = @_;
     $s = '' unless defined $s;

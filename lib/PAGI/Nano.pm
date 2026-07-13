@@ -13,6 +13,7 @@ use PAGI::Context;
 use PAGI::Nano::Context::HTTP;
 use PAGI::Nano::Context::WebSocket;
 use PAGI::Nano::Context::SSE;
+use PAGI::Nano::ServiceRegistry;
 
 use Exporter 'import';
 our @EXPORT = qw(
@@ -23,6 +24,7 @@ our @EXPORT = qw(
     static not_found
     websocket sse
     name middleware
+    service factory
 );
 
 # Per-route attribute markers. Both sit in the arrow chain between the path and
@@ -57,6 +59,7 @@ sub app (&) {
         named        => {},   # name => full path (own routes, group prefixes applied)
         nano_mounts  => [],   # { prefix => ..., app => <Nano app coderef> }
         prefix_stack => [],   # active group prefixes, for naming
+        services     => [],   # [name, builder] pairs, in declaration order
     };
     $block->();
     return _assemble($COLLECTOR);
@@ -69,13 +72,21 @@ sub _assemble {
     $app = _wrap_with_middleware($app, $collector->{app_mw})
         if @{$collector->{app_mw}};
 
-    if (@{$collector->{startup}} || @{$collector->{shutdown}}) {
+    my $registry = @{$collector->{services}}
+        ? PAGI::Nano::ServiceRegistry->new
+        : undef;
+
+    if (@{$collector->{startup}} || @{$collector->{shutdown}} || $registry) {
         require PAGI::Lifespan;
         my $lifespan = PAGI::Lifespan->new(app => $app);
+        $lifespan->on_startup(_service_startup_hook($registry, $collector->{services}))
+            if $registry;
         $lifespan->on_startup($_)  for @{$collector->{startup}};
         $lifespan->on_shutdown($_) for @{$collector->{shutdown}};
         $app = $lifespan->to_app;
     }
+
+    $app = _wrap_with_services($app, $registry) if $registry;
 
     # Flat name -> absolute-path registry: this app's own named routes plus those
     # of any mounted Nano app (prefixed, recursively via their stored tables).
@@ -157,6 +168,28 @@ sub _wrap_with_middleware {
     return $chain;
 }
 
+# The lifespan startup hook that eagerly instantiates every declared service,
+# in declaration order. Wrapped in async sub (rather than run synchronously
+# during app { }) so a builder's die becomes a failed Future that
+# PAGI::Lifespan awaits inside its own eval, turning it into
+# lifespan.startup.failed -- the worker fails at boot, not on a request.
+sub _service_startup_hook {
+    my ($registry, $services) = @_;
+    return async sub { $registry->_build_all($services) };
+}
+
+# Inject the registry onto every request's scope (plain assignment, not //=,
+# per the design: a mounted Nano app's own services must win for requests
+# routed into it).
+sub _wrap_with_services {
+    my ($app, $registry) = @_;
+    return sub {
+        my ($scope, $receive, $send) = @_;
+        $scope->{'pagi.nano.services'} = $registry if ref $scope eq 'HASH';
+        return $app->($scope, $receive, $send);
+    };
+}
+
 # --- HTTP verbs -------------------------------------------------------------
 
 sub get    { _add_route('GET',    @_) }
@@ -231,6 +264,11 @@ sub enable {
 
 sub startup  { push @{$COLLECTOR->{startup}},  $_[0] }
 sub shutdown { push @{$COLLECTOR->{shutdown}}, $_[0] }
+
+sub service {
+    my ($name, $builder) = @_;
+    push @{$COLLECTOR->{services}}, [$name, $builder];
+}
 
 sub not_found {
     my ($handler) = @_;
