@@ -85,3 +85,39 @@ service stamp => sub ($app) {
 
 Lazy app-scoped services, test-time overrides, generated accessors,
 teardown pairing, dependency graphs beyond declaration order.
+
+## v1 amendment (2026-07-13)
+
+Items 5 and 6 above are superseded by a shared-lifecycle rule discovered
+during implementation:
+
+**Root cause.** `PAGI::App::Router::to_app` (PAGI-Tools) returns immediately
+for a `lifespan`-type scope, before ever checking routes or mounts — a
+`lifespan.startup`/`lifespan.shutdown` event never reaches a mounted app's
+coderef. This is why `PAGI::Nano`'s own POD already documents that a mounted
+Nano app's `startup`/`shutdown` never run; the outermost app owns lifecycle.
+Item 2's eager, lifespan-driven instantiation (required as written — see item
+4's forward-reference test, which specifically needs the failure to surface
+through the lifespan protocol) can therefore never run for services declared
+inside a mounted app: their builders would simply never fire.
+
+**The rule (replacing items 5-6):** the outermost app owns service lifecycle,
+exactly as it already owns `startup`/`shutdown`.
+
+- `mount` croaks immediately if the app being mounted declared any services
+  — never a silent, always-unbuilt registry.
+- A mounted Nano app that declares **no** services of its own is unaffected:
+  it has no registry, so `$c->service` inside it resolves against whatever
+  the outermost app already injected onto the scope — the same instances the
+  rest of the app sees (both app-scoped and per-request).
+- Because a mounted app can no longer carry its own registry, only one
+  registry is ever in play for a given request. Item 6's refaddr sub-keying
+  of the per-request memoization cache is therefore unnecessary; the cache is
+  a single flat hash on the scope.
+- Detection reuses the existing named-routes introspection pattern: a
+  sibling probe token (alongside the existing routes probe) asks an opaque
+  mounted app's coderef whether it declared services, so `mount` can refuse
+  it before ever wiring it in.
+
+If lifespan forwarding to mounted apps is ever added to PAGI-Tools, per-mount
+services can be revisited.
