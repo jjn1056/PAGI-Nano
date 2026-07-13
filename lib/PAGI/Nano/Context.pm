@@ -45,6 +45,22 @@ sub uri_for {
     return $path;
 }
 
+# Resolve a declared service by name. Delegates to the registry PAGI::Nano
+# injects on the scope (the same mechanism uri_for uses for named routes),
+# which applies the scope-discrimination rule: an app-scoped value is returned
+# as-is, a per-request maker is invoked and memoized for this request/
+# connection, and a factory-marked maker is invoked fresh on every call.
+sub service {
+    my ($self, $name) = @_;
+
+    my $registry = $self->{scope}{'pagi.nano.services'};
+    Carp::croak("service: no service registry on the scope "
+        . "(is this a PAGI::Nano app, and was '$name' declared?)")
+        unless $registry;
+
+    return $registry->_resolve($name, $self);
+}
+
 sub _uri_escape {
     my ($s) = @_;
     $s = '' unless defined $s;
@@ -64,8 +80,8 @@ PAGI::Nano::Context - Shared behavior for the contexts PAGI::Nano vends
 
 A mixin inherited by L<PAGI::Nano::Context::HTTP>,
 L<PAGI::Nano::Context::WebSocket>, and L<PAGI::Nano::Context::SSE> alongside the
-stock PAGI context class for each scope type. It provides L</uri_for>, which is
-available to handlers of every protocol.
+stock PAGI context class for each scope type. It provides L</uri_for> and
+L</service>, both available to handlers of every protocol.
 
 =head1 METHODS
 
@@ -82,6 +98,16 @@ Resolution is against the flat name registry PAGI::Nano injects on the scope, so
 names defined anywhere in the app — including across a C<mount>, in either
 direction — are reachable, with mount prefixes applied. Dies if the name is
 unknown.
+
+=head2 service
+
+    my $value = $c->service($name);
+
+Resolves a service declared with L<PAGI::Nano/service>. Whether this returns
+the same app-scoped value every time, a per-request object built and memoized
+on first access, or a fresh object on every call, is decided by what the
+service's builder returned — see L<PAGI::Nano/SERVICES> for the full scoping
+rule. Dies if C<$name> was never declared.
 
 =head1 AUTHOR
 
