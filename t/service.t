@@ -198,6 +198,37 @@ subtest 'per-request: unblessed coderef => per-request maker, memoized in-reques
     $client->stop;
 };
 
+subtest 'per-request: undef maker result is still memoized by existence' => sub {
+    my $maker_calls = 0;
+    my $app = app {
+        service maybe => sub {
+            return sub {
+                ++$maker_calls;
+                return undef;
+            };
+        };
+        get '/twice' => sub {
+            my ($c) = @_;
+            my $first  = $c->service('maybe');
+            my $second = $c->service('maybe');
+            return {
+                both_undef => (!defined($first) && !defined($second) ? 1 : 0),
+                calls      => $maker_calls,
+            };
+        };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+    is $client->get('/twice')->json,
+        { both_undef => 1, calls => 1 },
+        'two accesses in one request invoke an undef-returning maker once';
+    is $client->get('/twice')->json,
+        { both_undef => 1, calls => 2 },
+        'the next request has a fresh cache and invokes it once';
+    $client->stop;
+};
+
 subtest 'per-request: a maker whose return value is itself a coderef is returned as-is, memoized' => sub {
     # Scope discrimination applies only to the BUILDER's return value (deciding
     # "this is a per-request maker"); the maker's own result is never

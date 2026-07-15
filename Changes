@@ -1,6 +1,9 @@
 Revision history for PAGI-Nano
 
 0.001001
+        - Per-request service makers now run at most once per service name per
+          request even when they return undef; memoization is based on cache-key
+          existence rather than value definedness.
         - ServiceRegistry: a service builder that returns a Future now croaks
           loudly at lifespan startup, naming the service, instead of silently
           storing the unresolved Future as the "service" (which failed

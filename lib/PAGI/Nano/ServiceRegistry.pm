@@ -69,7 +69,11 @@ sub _resolve {
     if (!Scalar::Util::blessed($raw) && ref($raw) eq 'CODE') {
         my $scope = $ctx->{scope};
         my $cache = $scope->{'pagi.nano.service_cache'} //= {};
-        return $cache->{$name} //= $raw->($ctx);
+        return $cache->{$name} if exists $cache->{$name};
+
+        my $value = $raw->($ctx);
+        $cache->{$name} = $value;
+        return $value;
     }
 
     return $raw;
