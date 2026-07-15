@@ -1,5 +1,18 @@
 Revision history for PAGI-Nano
 
+0.001001
+        - ServiceRegistry: a service builder that returns a Future now croaks
+          loudly at lifespan startup, naming the service, instead of silently
+          storing the unresolved Future as the "service" (which failed
+          cryptically later at $c->service). Service builders are synchronous
+          by design; use a per-request maker (a plain coderef) or factory(...)
+          for deferred or per-call construction.
+        - PAGI::Nano::resolve_service($app, $name): a test-facing seam to
+          resolve an app-scoped service value after lifespan startup without
+          issuing a request, via a private probe token on the assembled app
+          coderef. Returns the raw app-scoped value (a per-request maker or
+          factory marker comes back as-is, not per-request-resolved).
+
 0.001000  2026-06-20
         - Initial release.
         - app { } block-scoped collector returning an assembled PAGI app value
