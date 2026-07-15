@@ -119,6 +119,28 @@ subtest 'test seam: resolve an app-scoped service after startup, without a reque
     $client->stop;
 };
 
+subtest 'test seam: resolve_service returns a per-request maker raw, unresolved' => sub {
+    # resolve_service has no request context, so a service whose builder
+    # returns a plain coderef (a per-request maker) can't be resolved to a
+    # per-request value here. The documented contract: resolve_service hands
+    # back that raw coderef unchanged, by reference identity -- it must not
+    # be routed through ServiceRegistry::_resolve, which would invoke the
+    # maker and hand back its result instead of the maker itself.
+    my $maker = sub { return { built => 'per-request' } };
+    my $app = app {
+        service widget => sub { return $maker };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    my $resolved = PAGI::Nano::resolve_service($app, 'widget');
+    is refaddr($resolved), refaddr($maker),
+        'resolve_service returns the exact maker coderef by reference, not a per-request-resolved value';
+
+    $client->stop;
+};
+
 subtest 'test seam: resolving an unknown service croaks, naming it' => sub {
     my $app = app {
         service known => sub { 1 };
