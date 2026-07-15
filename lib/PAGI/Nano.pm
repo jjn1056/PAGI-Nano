@@ -384,7 +384,7 @@ sub not_found {
         my $adapted_send = _translate_not_found_send(
             $send,
             $prefix,
-            forbid_file => $type eq 'websocket',
+            body_only_protocol => $type,
         );
         return $http_handler->($scope, $receive, $adapted_send);
     };
@@ -399,9 +399,10 @@ sub _translate_not_found_send {
             unless $type eq 'http.response.start'
                 || $type eq 'http.response.body';
 
-        if ($opts{forbid_file} && $type eq 'http.response.body'
+        if ($opts{body_only_protocol} && $type eq 'http.response.body'
                 && (exists $event->{file} || exists $event->{fh})) {
-            Carp::croak('websocket denial responses support body bytes, not file/fh bodies');
+            Carp::croak("$opts{body_only_protocol} not_found responses support "
+                . 'body bytes, not file/fh bodies');
         }
 
         my %translated = %$event;
@@ -1027,13 +1028,14 @@ Sets the router's not-found handler; it is wrapped and coerced like any other
 HTTP handler. Write the handler as an ordinary HTTP-shaped Nano response.
 For an unmatched HTTP request its response events pass through unchanged; for
 an SSE scope Nano translates them to C<sse.http.response.*> decline events.
+Buffered and streamed byte bodies work for translated responses, but
+file-backed C<file>/C<fh> body events are not part of the SSE or WebSocket
+decline event families and croak loudly. Return bytes from the handler instead
+of C<send_file>.
 
 An unmatched WebSocket can carry the custom status, headers, and body only when
 the server advertises the C<websocket.http.response> extension. Nano then emits
-C<websocket.http.response.*> events. Buffered and streamed byte bodies work,
-but file-backed C<file>/C<fh> body events are not part of that extension and
-croak loudly. Return bytes from the handler instead of C<send_file> for a
-portable WebSocket denial body.
+C<websocket.http.response.*> events.
 
 Without the extension Nano does not invoke the custom handler. It sends a
 pre-accept C<websocket.close>, asking the server to provide the portable,

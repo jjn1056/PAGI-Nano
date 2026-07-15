@@ -22,8 +22,8 @@ Revision history for PAGI-Nano
           SSE uses sse.http.response.*, and WebSocket uses
           websocket.http.response.* when the server advertises that extension.
           WebSockets without it bypass the handler and close for a portable
-          body-less 403. WebSocket byte bodies may be buffered or streamed;
-          file/fh bodies fail loudly.
+          body-less 403. Translated byte bodies may be buffered or streamed;
+          SSE and WebSocket file/fh bodies fail loudly.
         - Context uri_for now percent-encodes decoded strings from UTF-8 bytes.
           Ordinary placeholders encode one segment and reject slash-containing
           values in favor of *splat routes; splats preserve separators while
