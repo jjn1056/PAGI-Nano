@@ -3,6 +3,7 @@ package PAGI::Nano::Context;
 use strict;
 use warnings;
 use Carp ();
+use Encode ();
 
 # Shared behavior mixed into every Nano context (HTTP, WebSocket, SSE) alongside
 # the stock PAGI context class for that scope type. It only needs $self->{scope},
@@ -26,13 +27,7 @@ sub uri_for {
     $path_params  ||= {};
     $query_params ||= {};
 
-    for my $key (keys %$path_params) {
-        my $val = $path_params->{$key};
-        $val = '' unless defined $val;
-        $path =~ s/\{\Q$key\E(?::[^}]*)?\}/$val/g
-            or $path =~ s/:\Q$key\E(?!\w)/$val/g
-            or $path =~ s/\*\Q$key\E(?!\w)/$val/g;
-    }
+    $path = _render_path($path, $path_params);
 
     if (%$query_params) {
         my @pairs;
@@ -43,6 +38,46 @@ sub uri_for {
     }
 
     return $path;
+}
+
+sub _render_path {
+    my ($template, $params) = @_;
+    my $rendered = '';
+    my $offset = 0;
+
+    while ($template =~ /(\{(\w+)(?::[^}]*)?\}|\*(\w+)|:(\w+))/g) {
+        # Capture all match state before an escaping helper runs another regex.
+        my ($start, $end) = ($-[0], $+[0]);
+        my ($token, $braced, $splat, $colon) = ($1, $2, $3, $4);
+        $rendered .= _escape_path_literal(
+            substr($template, $offset, $start - $offset)
+        );
+
+        my $name = defined $braced ? $braced
+                 : defined $splat  ? $splat
+                 :                   $colon;
+
+        if (!exists $params->{$name}) {
+            $rendered .= $token;
+        }
+        else {
+            my $value = defined $params->{$name} ? "$params->{$name}" : '';
+            if (defined $splat) {
+                $rendered .= join '/', map { _uri_escape($_) }
+                    split '/', $value, -1;
+            }
+            else {
+                Carp::croak(
+                    "uri_for: value for '$name' contains '/' -- use a *splat route for path-valued parameters"
+                ) if index($value, '/') >= 0;
+                $rendered .= _uri_escape($value);
+            }
+        }
+        $offset = $end;
+    }
+
+    $rendered .= _escape_path_literal(substr($template, $offset));
+    return $rendered;
 }
 
 # Resolve a declared service by name. Delegates to the registry PAGI::Nano
@@ -61,11 +96,22 @@ sub service {
     return $registry->_resolve($name, $self);
 }
 
-sub _uri_escape {
+sub _utf8_bytes {
     my ($s) = @_;
     $s = '' unless defined $s;
-    $s =~ s/([^A-Za-z0-9\-_.~])/sprintf('%%%02X', ord($1))/ge;
-    return $s;
+    return Encode::encode('UTF-8', $s, Encode::FB_CROAK());
+}
+
+sub _escape_path_literal {
+    my $bytes = _utf8_bytes($_[0]);
+    $bytes =~ s/([^A-Za-z0-9\-._~!\$&'()*+,;=:\@\/])/sprintf('%%%02X', ord($1))/ge;
+    return $bytes;
+}
+
+sub _uri_escape {
+    my $bytes = _utf8_bytes($_[0]);
+    $bytes =~ s/([^A-Za-z0-9\-._~])/sprintf('%%%02X', ord($1))/ge;
+    return $bytes;
 }
 
 1;
@@ -92,8 +138,15 @@ L</service>, both available to handlers of every protocol.
     my $url = $c->uri_for($name, \%path_params, \%query_params);
 
 Builds the URL for a route named with L<PAGI::Nano/name>. Path placeholders
-(C<:id>, C<{id}>, C<{id:regex}>, C<*splat>) are filled from C<%path_params>, and
-C<%query_params> (if any) is appended as a percent-encoded query string.
+(C<:id>, C<{id}>, C<{id:regex}>, C<*splat>) are filled from C<%path_params>.
+Pass decoded Perl strings, not pre-encoded URL components. Ordinary placeholders
+represent one path segment and percent-encode inserted values as UTF-8 bytes;
+they croak if a value contains C</>. Use C<*splat> for a path-valued parameter:
+its slash separators are preserved while each segment is encoded separately.
+This distinction is required because PAGI decodes percent-encoded paths,
+including C<%2F>, before routing. Literal route text preserves RFC 3986 path
+characters and slash separators. C<%query_params> (if any) is appended in sorted
+key order with UTF-8 percent encoding and C<%20> for spaces.
 Resolution is against the flat name registry PAGI::Nano injects on the scope, so
 names defined anywhere in the app — including across a C<mount>, in either
 direction — are reachable, with mount prefixes applied. Dies if the name is

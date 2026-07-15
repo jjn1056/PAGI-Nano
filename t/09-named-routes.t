@@ -1,5 +1,6 @@
 use strict;
 use warnings;
+use utf8;
 use Test2::V0;
 use Future::AsyncAwait;
 use PAGI::Test::Client;
@@ -30,6 +31,44 @@ subtest 'uri_for appends a query string' => sub {
     };
     my $res = PAGI::Test::Client->new(app => $app)->get('/users/5');
     is $res->json->{url}, '/users/5?tab=profile', 'query string appended';
+};
+
+subtest 'uri_for percent-encodes decoded strings with route-aware semantics' => sub {
+    my $ctx = bless {
+        scope => {
+            'pagi.nano.routes' => {
+                user   => '/café/users/:id',
+                search => '/search',
+                files  => '/files/*path',
+            },
+        },
+    }, 'PAGI::Nano::Context';
+
+    is $ctx->uri_for('user', { id => 'a b?#%' }),
+        '/caf%C3%A9/users/a%20b%3F%23%25',
+        'literal and ordinary-placeholder values use UTF-8 path encoding';
+
+    is $ctx->uri_for('search', {}, { café => 'a b&=', z => '☃' }),
+        '/search?caf%C3%A9=a%20b%26%3D&z=%E2%98%83',
+        'query keys and values use sorted UTF-8 percent encoding';
+
+    is $ctx->uri_for('files', { path => 'café/a b' }),
+        '/files/caf%C3%A9/a%20b',
+        'splat preserves only its slash separators';
+
+    is $ctx->uri_for('user', { id => '%2F' }),
+        '/caf%C3%A9/users/%252F',
+        'callers pass decoded values rather than pre-encoded values';
+};
+
+subtest 'uri_for rejects slash in an ordinary placeholder' => sub {
+    my $ctx = bless {
+        scope => { 'pagi.nano.routes' => { user => '/users/:id' } },
+    }, 'PAGI::Nano::Context';
+
+    my $err = dies { $ctx->uri_for('user', { id => 'a/b' }) };
+    like $err, qr{/.*splat|splat.*/}i,
+        'ordinary placeholder rejects a path-valued input and points to splat';
 };
 
 subtest 'middleware() marker is equivalent to the [] shorthand' => sub {

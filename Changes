@@ -18,6 +18,11 @@ Revision history for PAGI-Nano
           WebSockets without it bypass the handler and close for a portable
           body-less 403. WebSocket byte bodies may be buffered or streamed;
           file/fh bodies fail loudly.
+        - Context uri_for now percent-encodes decoded strings from UTF-8 bytes.
+          Ordinary placeholders encode one segment and reject slash-containing
+          values in favor of *splat routes; splats preserve separators while
+          encoding each segment. Query keys and values remain sorted and use
+          %20 for spaces.
 
 0.001000  2026-06-20
         - Initial release.
