@@ -10,7 +10,7 @@ requires 'Future', '0.50';
 requires 'Future::AsyncAwait', '0.66';
 
 # The base toolkit Nano is sugar over.
-requires 'PAGI::Tools', '0.002000';
+requires 'PAGI::Tools', '0.002003';
 
 # The strong-parameters engine behind $c->params.
 requires 'PAGI::StructuredParameters', '0.001000';

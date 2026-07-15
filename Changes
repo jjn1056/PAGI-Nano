@@ -1,6 +1,9 @@
 Revision history for PAGI-Nano
 
 0.001001
+        - Require PAGI::Tools 0.002003 for extension-aware default WebSocket
+          declines and the stricter Test::Client lifespan-startup behavior
+          accounted for by Nano's lifecycle-free parent tests.
         - Per-request service makers now run at most once per service name per
           request even when they return undef; memoization is based on cache-key
           existence rather than value definedness.
