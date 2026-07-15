@@ -47,6 +47,15 @@ my $ROUTES_PROBE = \do { my $unused };
 # POD), so a mounted app's own services would never get built.
 my $SERVICES_PROBE = \do { my $unused };
 
+# A two-argument probe token: ask an assembled Nano app to resolve one named
+# app-scoped service from its retained registry, without issuing a request.
+# The registry the startup hook builds is the same object this outer wrapper
+# closes over, so once lifespan startup has run its values are reachable here.
+# resolve_service() (a test seam) sends this; a real request is always a
+# three-element ($scope, $receive, $send) triple, so the two-arg shape never
+# collides with one.
+my $SERVICE_RESOLVE_PROBE = \do { my $unused };
+
 # The dynamically-scoped current collector. app { } localizes this to a fresh
 # collector for the duration of the block; the verbs register into it. No package
 # globals leak between app { } invocations, so apps are values: composable,
@@ -117,6 +126,13 @@ sub _assemble {
             return $flat            if $_[0] == $ROUTES_PROBE;
             return $registry ? 1 : 0 if $_[0] == $SERVICES_PROBE;
         }
+        # The service-resolve probe (a test seam) carries the service name as a
+        # second argument. resolve_service only sends it after confirming via
+        # $SERVICES_PROBE that the app declared services, so $registry is defined
+        # here; the registry croaks, naming the service, on an unknown name.
+        if (@_ == 2 && ref $_[0] && $_[0] == $SERVICE_RESOLVE_PROBE) {
+            return $registry->service($_[1]);
+        }
         my ($scope, $receive, $send) = @_;
         $scope->{'pagi.nano.routes'} //= $flat if ref $scope eq 'HASH';
         return $inner->($scope, $receive, $send);
@@ -158,6 +174,24 @@ sub _nano_flat_routes {
 sub _nano_has_services {
     my ($app) = @_;
     return _probe($app, $SERVICES_PROBE) ? 1 : 0;
+}
+
+# A test seam: resolve one app-scoped service from an assembled Nano app after
+# lifespan startup, without issuing a request. Given the app coderef and a
+# service name, it sends the two-argument service-resolve probe and returns the
+# built value. Only app-scoped services (a plain value or a blessed
+# non-factory object) fully resolve without a request; a per-request maker or a
+# factory needs a request context, so for those this returns the raw maker
+# coderef / factory marker unchanged -- a test needing the per-request value
+# must drive a request. Croaks if $app is not a coderef or declared no
+# services, and (via the registry) if the name is unknown.
+sub resolve_service {
+    my ($app, $name) = @_;
+    Carp::croak('resolve_service: expected an assembled Nano app coderef')
+        unless ref $app eq 'CODE';
+    Carp::croak('resolve_service: this app declares no services')
+        unless _nano_has_services($app);
+    return $app->($SERVICE_RESOLVE_PROBE, $name);
 }
 
 sub _build_flat_routes {
@@ -906,6 +940,30 @@ registry, so C<< $c->service >> inside it simply resolves against whatever the
 outermost app injected onto the scope, the same instances the rest of the app
 sees. If lifespan forwarding to mounted apps is ever added, per-mount services
 can be revisited.
+
+=head2 resolve_service
+
+    my $app = app { service schema => sub { $dbh } };
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;                                    # runs the builders
+    my $schema = PAGI::Nano::resolve_service($app, 'schema');
+
+A test seam. C<< $c->service >> is only reachable from inside a request handler,
+so a test that wants to assert on an app-scoped service — or hand it to code
+under test — otherwise has to route a request just to reach it, or reconstruct
+the service by hand. C<resolve_service> (not exported; call it fully qualified)
+reaches the service directly: given the assembled app coderef and a name, it
+returns the built value, B<after lifespan startup has run> (drive it with
+C<< PAGI::Test::Client->start >>, or a lifespan C<startup> event by hand). The
+registry the startup hook builds is retained on the app coderef, so no request
+is involved.
+
+It resolves B<app-scoped> services (a plain value or a blessed non-C<factory>
+object). A per-request maker or a C<factory> is constructed against a request
+context, which does not exist here, so for those C<resolve_service> returns the
+raw maker coderef / factory marker rather than a per-request instance — a test
+needing the per-request value must drive a real request. Resolving an unknown
+name croaks (naming it), as does calling it on an app that declared no services.
 
 =head1 STATIC FILES AND CUSTOM 404
 

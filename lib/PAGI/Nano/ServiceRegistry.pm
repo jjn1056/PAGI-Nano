@@ -101,6 +101,11 @@ Returns an already-built service, for use inside another service's builder
 startup; asking for one declared later in the same C<app { }> block (or not
 declared at all) croaks, naming the service.
 
+A test that wants to read an app-scoped service without issuing a request does
+not reach this object directly (it is private); it uses the
+C<< PAGI::Nano::resolve_service($app, $name) >> seam, which resolves against
+this registry after lifespan startup. See L<PAGI::Nano/resolve_service>.
+
 =head1 SEE ALSO
 
 L<PAGI::Nano>, L<PAGI::Nano::Context>.

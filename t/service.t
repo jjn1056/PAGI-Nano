@@ -100,6 +100,48 @@ subtest 'app-scoped: a builder returning undef is a legitimate built value, not 
     $client->stop;
 };
 
+subtest 'test seam: resolve an app-scoped service after startup, without a request' => sub {
+    # The registry the startup hook builds is retained by closure on the
+    # assembled app coderef (it is the same object the request-time injector and
+    # the probe wrapper close over). resolve_service reaches it through a probe
+    # token, so a test can read an app-scoped service after lifespan startup
+    # without driving a request handler.
+    my $app = app {
+        service schema => sub { 'THE-SCHEMA' };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    is PAGI::Nano::resolve_service($app, 'schema'), 'THE-SCHEMA',
+        'resolve_service returns the built app-scoped value with no request issued';
+
+    $client->stop;
+};
+
+subtest 'test seam: resolving an unknown service croaks, naming it' => sub {
+    my $app = app {
+        service known => sub { 1 };
+    };
+
+    my $client = PAGI::Test::Client->new(app => $app, lifespan => 1);
+    $client->start;
+
+    my $err = dies { PAGI::Nano::resolve_service($app, 'nope') };
+    like $err, qr/nope/, 'the croak names the unknown service (delegates to the registry)';
+
+    $client->stop;
+};
+
+subtest 'test seam: resolving on an app that declared no services croaks' => sub {
+    my $app = app {
+        get '/x' => sub { 'ok' };
+    };
+
+    my $err = dies { PAGI::Nano::resolve_service($app, 'anything') };
+    like $err, qr/no services/i, 'the croak explains the app declares no services';
+};
+
 subtest 'per-request: unblessed coderef => per-request maker, memoized in-request, fresh per request' => sub {
     my @maker_ctx;
     my $app = app {
