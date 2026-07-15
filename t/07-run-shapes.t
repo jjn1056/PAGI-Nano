@@ -50,11 +50,9 @@ subtest 'modulino mounts inside a larger app (no rewrite)' => sub {
         mount '/tasks' => MyApp->to_app;
     };
 
-    my $client = PAGI::Test::Client->new(app => $parent, lifespan => 1);
-    $client->start;
+    my $client = PAGI::Test::Client->new(app => $parent);
     is $client->get('/')->json, { app => 'parent' }, 'parent route';
     is $client->get('/tasks/')->json, [], 'mounted modulino reachable under prefix';
-    $client->stop;
 };
 
 done_testing;
