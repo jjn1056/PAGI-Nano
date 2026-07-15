@@ -361,7 +361,53 @@ sub factory {
 
 sub not_found {
     my ($handler) = @_;
-    $COLLECTOR->{router}{not_found} = _wrap_http($handler, '');
+    my $http_handler = _wrap_http($handler, '');
+
+    $COLLECTOR->{router}{not_found} = sub {
+        my ($scope, $receive, $send) = @_;
+        my $type = $scope->{type} // 'http';
+
+        return $http_handler->($scope, $receive, $send)
+            if $type eq 'http';
+
+        Carp::croak("not_found cannot decline unsupported scope type '$type'")
+            unless $type eq 'sse' || $type eq 'websocket';
+
+        if ($type eq 'websocket'
+                && !exists(($scope->{extensions} // {})->{'websocket.http.response'})) {
+            return $send->({ type => 'websocket.close' });
+        }
+
+        my $prefix = $type eq 'sse'
+            ? 'sse.http.response'
+            : 'websocket.http.response';
+        my $adapted_send = _translate_not_found_send(
+            $send,
+            $prefix,
+            forbid_file => $type eq 'websocket',
+        );
+        return $http_handler->($scope, $receive, $adapted_send);
+    };
+}
+
+sub _translate_not_found_send {
+    my ($send, $prefix, %opts) = @_;
+    return sub {
+        my ($event) = @_;
+        my $type = $event->{type} // '';
+        Carp::croak("not_found emitted unsupported event '$type'")
+            unless $type eq 'http.response.start'
+                || $type eq 'http.response.body';
+
+        if ($opts{forbid_file} && $type eq 'http.response.body'
+                && (exists $event->{file} || exists $event->{fh})) {
+            Carp::croak('websocket denial responses support body bytes, not file/fh bodies');
+        }
+
+        my %translated = %$event;
+        $translated{type} =~ s/^http\.response/$prefix/;
+        return $send->(\%translated);
+    };
 }
 
 # --- WebSocket / SSE (imperative; not coerced) ------------------------------
@@ -978,7 +1024,20 @@ Serves files under C<public/> at C</assets/*> (wraps L<PAGI::App::File>).
     not_found sub ($c) { ... };
 
 Sets the router's not-found handler; it is wrapped and coerced like any other
-HTTP handler.
+HTTP handler. Write the handler as an ordinary HTTP-shaped Nano response.
+For an unmatched HTTP request its response events pass through unchanged; for
+an SSE scope Nano translates them to C<sse.http.response.*> decline events.
+
+An unmatched WebSocket can carry the custom status, headers, and body only when
+the server advertises the C<websocket.http.response> extension. Nano then emits
+C<websocket.http.response.*> events. Buffered and streamed byte bodies work,
+but file-backed C<file>/C<fh> body events are not part of that extension and
+croak loudly. Return bytes from the handler instead of C<send_file> for a
+portable WebSocket denial body.
+
+Without the extension Nano does not invoke the custom handler. It sends a
+pre-accept C<websocket.close>, asking the server to provide the portable,
+body-less 403 denial response.
 
 =head1 STREAMING, WEBSOCKET, SSE
 

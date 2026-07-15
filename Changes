@@ -12,6 +12,12 @@ Revision history for PAGI-Nano
           issuing a request, via a private probe token on the assembled app
           coderef. Returns the raw app-scoped value (a per-request maker or
           factory marker comes back as-is, not per-request-resolved).
+        - Custom not_found responses now emit protocol-valid decline events:
+          SSE uses sse.http.response.*, and WebSocket uses
+          websocket.http.response.* when the server advertises that extension.
+          WebSockets without it bypass the handler and close for a portable
+          body-less 403. WebSocket byte bodies may be buffered or streamed;
+          file/fh bodies fail loudly.
 
 0.001000  2026-06-20
         - Initial release.
