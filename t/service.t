@@ -385,4 +385,40 @@ subtest 'error: a forward reference to a not-yet-built service fails lifespan st
         'lifespan.startup.complete was never sent';
 };
 
+subtest 'error: a builder returning a Future croaks at lifespan startup, naming the service' => sub {
+    # Builders are synchronous -- they run at lifespan startup. A builder
+    # written as `async sub {...}` returns an unresolved Future; storing that
+    # verbatim as the "service" would fail cryptically later at $c->service
+    # time. Fail fast and loud at build time instead. As with the forward-ref
+    # case above, drive the lifespan protocol by hand to observe the failure
+    # event directly (PAGI::Test::Client->start does not surface it).
+    my $app = app {
+        service async_oops => async sub { my ($app) = @_; return 42 };
+    };
+
+    my @events;
+    my $scope = {
+        type => 'lifespan',
+        pagi => { version => '0.2', spec_version => '0.2' },
+        state => {},
+    };
+    my $receive_calls = 0;
+    my $receive = async sub {
+        $receive_calls++;
+        return { type => 'lifespan.startup' } if $receive_calls == 1;
+        die 'test receive() called more than once; unexpected for a failed startup';
+    };
+    my $send = async sub { my ($event) = @_; push @events, $event };
+
+    $app->($scope, $receive, $send)->get;
+
+    my ($failed) = grep { ($_->{type} // '') eq 'lifespan.startup.failed' } @events;
+    ok $failed, 'lifespan.startup.failed was sent';
+    like $failed->{message}, qr/async_oops/, 'the failure names the offending service';
+    like $failed->{message}, qr/Future/, 'the failure explains a Future was returned';
+
+    ok !(grep { ($_->{type} // '') eq 'lifespan.startup.complete' } @events),
+        'lifespan.startup.complete was never sent';
+};
+
 done_testing;

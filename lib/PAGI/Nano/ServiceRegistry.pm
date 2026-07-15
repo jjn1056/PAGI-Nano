@@ -24,7 +24,19 @@ sub _build_all {
     my ($self, $services) = @_;
     for my $entry (@$services) {
         my ($name, $builder) = @$entry;
-        $self->{built}{$name} = $builder->($self);
+        my $value = $builder->($self);
+        # A builder written as `async sub {...}` returns an unresolved Future.
+        # Builders are synchronous (they run at startup), so storing that as the
+        # service would only fail cryptically later at resolve time -- fail loud
+        # here instead. Duck-type on ->can('then') to catch Future and
+        # Future::AsyncAwait futures without depending on a specific class.
+        Carp::croak(
+            "service '$name' builder returned a Future -- service builders must be "
+          . "synchronous (they run at lifespan startup). Build the value synchronously, "
+          . "or return a per-request maker (a plain coderef) / a factory(...) maker "
+          . "if you need per-request/per-call construction."
+        ) if Scalar::Util::blessed($value) && $value->can('then');
+        $self->{built}{$name} = $value;
     }
 }
 

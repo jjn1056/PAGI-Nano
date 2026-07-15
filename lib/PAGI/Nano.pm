@@ -870,7 +870,10 @@ Builders run B<eagerly, once per worker, in declaration order>, at lifespan
 startup — registered before any user C<startup> hook (see L</startup /
 shutdown>). A builder that dies fails lifespan startup, so a misconfigured
 service stops the worker at boot rather than surfacing on a customer's first
-request.
+request. Builders are B<synchronous>: a builder written as C<async sub>
+returns a Future, and returning a Future croaks at startup — for deferred
+construction return a per-request maker (a plain coderef) or a C<factory>
+maker instead.
 
 Builders B<compose>: each builder receives the registry itself (C<$app> in
 the examples above), and C<< $app->service(NAME) >> returns an
