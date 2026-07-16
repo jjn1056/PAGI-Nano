@@ -15,6 +15,8 @@ use PAGI::Nano::Context::WebSocket;
 use PAGI::Nano::Context::SSE;
 use PAGI::Nano::ServiceRegistry;
 
+our $VERSION = '0.001001';
+
 use Exporter 'import';
 our @EXPORT = qw(
     app
